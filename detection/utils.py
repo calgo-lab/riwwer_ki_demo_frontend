@@ -225,106 +225,79 @@ def plot_overflow(sensor_df, sensor_name, threshold):
 def analyze_rain_before_overflow(
     df: pd.DataFrame,
     sensor_name: str,
-    rain_col: str = "Niederschlag_mm",
-    time_col: str = "Datetime",
-    overflow_threshold: float = 5.7,
-    rain_window_minutes: int = 180,
-    rain_trigger_threshold: float = 1.0,
-    now: pd.Timestamp = None,
-):
-    df = df[[time_col, sensor_name, rain_col]].copy()
-    if now:
-        df = df[df[time_col] <= now]
-    df = df.dropna(subset=[sensor_name])
-
-    df["Overflow"] = df[sensor_name] > overflow_threshold
-    df = df.sort_values(time_col).reset_index(drop=True)
-
-    overflow_events = df[df["Overflow"]]
-
-    rain_sums = []
-    for event_time in overflow_events[time_col]:
-        window_start = event_time - pd.Timedelta(minutes=rain_window_minutes)
-        rain_window = df[(df[time_col] >= window_start) & (df[time_col] < event_time)]
-        rain_sum = rain_window[rain_col].sum()
-        rain_sums.append(rain_sum)
-
-    # 添加结果列
-    overflow_events = overflow_events.copy()
-    overflow_events["RainBeforeOverflow"] = rain_sums
-    overflow_events["RainTriggered"] = (
-        overflow_events["RainBeforeOverflow"] >= rain_trigger_threshold
-    )
-
-    # 统计结果
-    total_overflows = len(overflow_events)
-    rain_triggered = overflow_events["RainTriggered"].sum()
-    avg_rain = (
-        overflow_events["RainBeforeOverflow"].mean() if total_overflows > 0 else 0
-    )
-
-    print(f"Total overflow events: {total_overflows}")
-    print(
-        f"Overflow events triggered by rain (>{rain_trigger_threshold}mm in {rain_window_minutes}min): {rain_triggered}"
-    )
-    print(f"Avg rainfall before overflow: {avg_rain:.2f} mm")
-
-    return overflow_events
-
-
-def analyze_rain_before_overflow(
-    df: pd.DataFrame,
-    sensor_name: str,
     now: pd.Timestamp,
     rain_col: str = "Niederschlag_mm",
     time_col: str = "Datetime",
     overflow_threshold: float = 5.7,  # 6.0*0.95
     rain_window_minutes: int = 180,
     rain_trigger_threshold: float = 1.0,
-):
-    # Filter and prepare the DataFrame
+) -> pd.DataFrame:
+
     df = df[[time_col, sensor_name, rain_col]].copy()
-    df = df[df[time_col] <= now]
+    df = df[df[time_col] <= now].sort_values(time_col).reset_index(drop=True)
     df[sensor_name] = df[sensor_name].interpolate(limit_direction="both")
     df[rain_col] = df[rain_col].interpolate(limit_direction="both")
 
-    # Check for overflow conditions
     df["Overflow"] = df[sensor_name] > overflow_threshold
-    df = df.sort_values(time_col).reset_index(drop=True)
-    overflow_events = df[df["Overflow"]]
+    df["ChangePoint"] = df["Overflow"].ne(df["Overflow"].shift()).astype(int)
 
-    # Calculate rainfall before each overflow event
+    df_cp = df[df["ChangePoint"] == 1].copy().reset_index(drop=True)
+    overflow_segments = []
+
+    for idx in range(1, len(df_cp), 2):
+        start_row = df_cp.iloc[idx]
+        end_row = df_cp.iloc[idx + 1]
+
+        if start_row["Overflow"]:
+            start_time = start_row[time_col]
+            end_time = end_row[time_col]
+            duration_hours = (end_time - start_time).total_seconds() / 3600
+
+            if duration_hours >= 2:
+                overflow_segments.append(
+                    {
+                        "StartTime": start_time,
+                        "EndTime": end_time,
+                        "DurationHours": duration_hours,
+                    }
+                )
+
+    if not overflow_segments:
+        print("⚠️ No valid overflow segments (≥2 hours) detected.")
+        return pd.DataFrame()
+
+    overflow_segments_df = pd.DataFrame(overflow_segments)
+
     rain_sums = []
-    for event_time in overflow_events[time_col]:
-        window_start = event_time - pd.Timedelta(minutes=rain_window_minutes)
-        rain_window = df[(df[time_col] >= window_start) & (df[time_col] < event_time)]
-        rain_sum = rain_window[rain_col].sum()
-        rain_sums.append(rain_sum)
+    for start_time in overflow_segments_df["StartTime"]:
+        window_start = start_time - pd.Timedelta(minutes=rain_window_minutes)
+        rain_window = df[(df[time_col] >= window_start) & (df[time_col] < start_time)]
+        rain_sums.append(rain_window[rain_col].sum())
 
-    # Create a new DataFrame for overflow events with rain data
-    overflow_events = overflow_events.copy()
-    overflow_events["RainBeforeOverflow"] = rain_sums
-    overflow_events["RainTriggered"] = (
-        overflow_events["RainBeforeOverflow"] >= rain_trigger_threshold
+    overflow_segments_df["RainBeforeOverflow"] = rain_sums
+    overflow_segments_df["RainTriggered"] = (
+        overflow_segments_df["RainBeforeOverflow"] >= rain_trigger_threshold
     )
-
-    # 统计结果
-    total_overflows = len(overflow_events)
-    total_records = len(df)
-    overflow_percentage = (
-        (total_overflows / total_records) * 100 if total_records > 0 else 0
-    )
-    rain_triggered = overflow_events["RainTriggered"].sum()
-    avg_rain = (
-        overflow_events["RainBeforeOverflow"].mean() if total_overflows > 0 else 0
-    )
-
+    print("Overflow Analysis Results:")
     print(
-        f"Total overflow events: {total_overflows} out of {total_records}, which is {overflow_percentage:.2f}%"
+        "Total overflow segments detected:",
+        len(df[df["Overflow"] == True]),
+        "of",
+        len(df),
+        ",",
+        round(len(df[df["Overflow"] == True]) / len(df) * 100, 2),
+        "%",
     )
     print(
-        f"Overflow events triggered by rain (>{rain_trigger_threshold}mm in {rain_window_minutes}min): {rain_triggered}"
+        f"Detected {len(overflow_segments_df)} continous overflow segments (≥2 hours)"
     )
-    print(f"Avg rainfall before overflow: {avg_rain:.2f} mm")
-
-    return overflow_events
+    print(f"Average duration: {overflow_segments_df['DurationHours'].mean():.2f} hours")
+    print(f"Maximum duration: {overflow_segments_df['DurationHours'].max():.2f} hours")
+    print(f"Minimum duration: {overflow_segments_df['DurationHours'].min():.2f} hours")
+    print(
+        f"Overflow segments triggered by rain (> {rain_trigger_threshold} mm in {rain_window_minutes} min): {overflow_segments_df['RainTriggered'].sum()}"
+    )
+    print(
+        f"Avg rainfall before overflow: {overflow_segments_df['RainBeforeOverflow'].mean():.2f} mm"
+    )
+    return overflow_segments_df
