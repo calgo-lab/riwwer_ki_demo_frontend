@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
-import time
+import folium
+from streamlit_folium import st_folium
+from jinja2 import Template
+
+from utils.config import MAP_DATA, read_data, TARGET_COLUMN
 
 # Please use "streamlit run main.py" to run this app
 
@@ -14,32 +18,41 @@ st.sidebar.button(
     "About", on_click=lambda: st.write("This app demonstrates the RIWWER KI project.")
 )
 
-# Coordinates (long, lat)
-coordinates_dict = {
-    "sewage_treatment_facility": (6.7120366, 51.54740289999999),
-    "kaiserstrasse": (6.707509099999999, 51.5402328),
-    "kreuzweg": (6.710619200000001, 51.54230800000001),
-    "vierlindenhof": (6.7371562, 51.5366435),
-    "herzogstrasse": (6.723143199999999, 51.5433485),
-    "franz_lenze_platz": (6.7233365, 51.5368246),
-}
-
-# Map data
-map_data = pd.DataFrame(
-    {
-        "longitude": [coord[0] for coord in coordinates_dict.values()],
-        "latitude": [coord[1] for coord in coordinates_dict.values()],
-        "info": list(coordinates_dict.keys()),
-    }
-)
-st.write("Map Data:")
-st.dataframe(map_data)
-
 st.subheader("Map of Locations")
-st.map(map_data)
 
-vierlinden_data = pd.read_csv("data/vierlinden_21_22_23_all_with_forecast.csv")
+# Calculate the center of the bounding box for the map view
+center_lat = (MAP_DATA["latitude"].min() + MAP_DATA["latitude"].max()) / 2
+center_lon = (MAP_DATA["longitude"].min() + MAP_DATA["longitude"].max()) / 2
 
+# Create a folium map
+m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
+
+# Load the HTML template for the popup
+with open("templates/popup.html") as f:
+    popup_template = Template(f.read())
+
+# Add markers with click-popups
+for index, row in MAP_DATA.iterrows():
+    popup_html = popup_template.render(
+        INFO=row["info"],
+        LAT=row["latitude"],
+        LON=row["longitude"],
+        SENSORS=row["sensor_groups"],
+    )
+    folium.CircleMarker(
+        location=[row["latitude"], row["longitude"]],
+        radius=10,
+        color="#C81E00",
+        fill=True,
+        fill_color="#C81E00",
+        fill_opacity=0.5,
+        popup=folium.Popup(popup_html, max_width=300),
+    ).add_to(m)
+
+# Render the map in Streamlit
+st_folium(m, width=725)
+
+vierlinden_data = read_data()
 st.dataframe(vierlinden_data)
 
 MAX_LINES = len(vierlinden_data)
