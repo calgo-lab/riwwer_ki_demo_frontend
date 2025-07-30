@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 from jinja2 import Template
 
 from utils.config import MAP_DATA, read_data, TARGET_COLUMN
+from components import TimeSlider
 
 # Please use "streamlit run main.py" to run this app
 
@@ -39,9 +40,9 @@ for index, row in MAP_DATA.iterrows():
         LON=row["longitude"],
         SENSORS=row["sensor_groups"],
     )
-    folium.CircleMarker(
+    folium.Circle(
         location=[row["latitude"], row["longitude"]],
-        radius=10,
+        radius=100,  # radius in meters
         color="#C81E00",
         fill=True,
         fill_color="#C81E00",
@@ -55,71 +56,80 @@ st_folium(m, width=725)
 vierlinden_data = read_data()
 st.dataframe(vierlinden_data)
 
-MAX_LINES = len(vierlinden_data)
-MIN_LINES = 0
+# Initialize the time slider component
+time_slider = TimeSlider(vierlinden_data, session_key="main_timeline")
 
-if "autoplay" not in st.session_state:
-    st.session_state["autoplay"] = False
-
-
-def next_line():
-    if st.session_state["slider1"] < MAX_LINES:
-        st.session_state["slider1"] += 1
-    else:
-        pass  # todo: warning end of slider reached
-    return
-
-
-def prev_line():
-    if st.session_state["slider1"] > MIN_LINES:
-        st.session_state["slider1"] -= 1
-    else:
-        pass  # todo: warning start of slider reached
-    return
-
-
-def autoplay_clicked():
-    st.session_state["autoplay"] = not st.session_state["autoplay"]
-
-
-# --- AUTOPLAY LOGIC ---
-if st.session_state["autoplay"]:
-    if st.session_state["slider1"] < MAX_LINES:
-        st.session_state["slider1"] += 1
-    else:
-        st.session_state["autoplay"] = False
-
-timeevent = st.slider(
-    "time event", min_value=MIN_LINES, max_value=MAX_LINES, key="slider1"
+# Render the time slider component
+st.subheader("Time Navigation")
+current_idx, current_timestamp = time_slider.render(
+    label="Select Time Event",
+    show_controls=True,
+    show_current_info=True,
+    hours_per_second=10.0,  # 10 hours pass per real second
+    renders_per_second=1.0  # Update display 1 time per second
 )
-col1, col2, col3, col4 = st.columns(4)
+
+# Use the values directly returned from TimeSlider for immediate synchronization
+current_row_data = vierlinden_data.iloc[current_idx]
+current_value = current_row_data[TARGET_COLUMN]
+
+# Display current data information
+st.subheader("Current Data Point")
+col1, col2 = st.columns(2)
 with col1:
-    st.write("selected timeevent number:", timeevent)
+    st.write(f"**Current Index:** {current_idx}")
+    st.write(f"**Current Timestamp:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
 with col2:
-    button_prev = st.button("prev", on_click=prev_line, key="button_prev")
-with col3:
-    button_next = st.button("next", on_click=next_line, key="button_next")
-with col4:
-    button_autoplay = st.button(
-        "autoplay", on_click=autoplay_clicked, key="autoplaybutton"
-    )
-    st.write(st.session_state["autoplay"])
+    st.write(f"**{TARGET_COLUMN}:** {current_value:.2f}")
+    st.write(f"**Position:** {current_idx + 1} of {len(vierlinden_data)}")
 
-st.dataframe(vierlinden_data.iloc[timeevent])
-st.write(
-    f"Filling level of rain basin for event: {vierlinden_data.iloc[timeevent]['PV_18_Fuellstand_RUEB_1_ival']}"
-)
+# Show full current row data
+with st.expander("View Full Current Row Data"):
+    st.dataframe(current_row_data)
 
-# Visualize filling level with an area chart
-min_value = vierlinden_data["PV_18_Fuellstand_RUEB_1_ival"].min()
-max_value = vierlinden_data["PV_18_Fuellstand_RUEB_1_ival"].max()
+# Add a visual indicator for the current position
+st.write(f"📍 **Current Position:** {current_timestamp.strftime('%Y-%m-%d %H:%M')} - **{TARGET_COLUMN}:** {current_value:.2f}")
 
-st.subheader("Filling Level Area Chart")
-st.area_chart(
-    vierlinden_data["PV_18_Fuellstand_RUEB_1_ival"],
-    use_container_width=True,
-    height=300,
-)
+# Optional: You could also show a line chart with the current point highlighted
+if st.checkbox("Show detailed view with current point"):
+    try:
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        
+        # Add the main data
+        fig.add_trace(go.Scatter(
+            x=vierlinden_data.index,
+            y=vierlinden_data[TARGET_COLUMN],
+            mode='lines',
+            name=TARGET_COLUMN,
+            line=dict(color='blue')
+        ))
+        
+        # Add current point using direct values from TimeSlider
+        fig.add_trace(go.Scatter(
+            x=[current_timestamp],
+            y=[current_value],
+            mode='markers',
+            name='Current Position',
+            marker=dict(color='red', size=10, symbol='circle')
+        ))
+        
+        fig.update_layout(
+            title=f"{TARGET_COLUMN} Over Time",
+            xaxis_title="Time",
+            yaxis_title=TARGET_COLUMN,
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    except ImportError:
+        st.warning("Plotly not available. Install plotly for enhanced visualization: `pip install plotly`")
+        # Fallback to basic line chart
+        chart_data_with_marker = vierlinden_data[TARGET_COLUMN].copy()
+        st.line_chart(chart_data_with_marker, use_container_width=True, height=400)
 
-if st.session_state["autoplay"]:
+
+# Check if autoplay is active and trigger rerun from main.py
+if st.session_state.get("main_timeline_autoplay", False):
     st.rerun()

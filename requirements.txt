@@ -77,3 +77,4 @@ watchdog==6.0.0
 wcwidth==0.2.13
 folium==0.20.0
 streamlit-folium==0.25.0
+plotly==6.2.0
