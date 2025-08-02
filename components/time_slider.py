@@ -61,8 +61,14 @@ class TimeSlider:
         # Check for non-uniform time intervals and warn if detected
         if len(data) > 2:
             deltas = data.index[1:] - data.index[:-1]
-            if not deltas.nunique() == 1:
+            unique_deltas = deltas.nunique()
+            # Only warn if there are significant irregularities (more than DST transitions)
+            if unique_deltas > 3:  # Allow for 1h, 2h, and 0h intervals (DST transitions)
                 st.warning("⚠️ Non-uniform time intervals detected. Autoplay timing may be inconsistent.")
+            elif unique_deltas > 1:
+                # Show info about DST transitions instead of warning
+                non_hourly_count = (deltas != pd.Timedelta(hours=1)).sum()
+                st.info(f"ℹ️ Dataset contains {non_hourly_count} daylight saving time transitions.")
         
         # Store only timestamps for memory optimization with large datasets
         self.timestamps = data.index.tolist()

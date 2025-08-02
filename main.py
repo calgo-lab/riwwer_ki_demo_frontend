@@ -5,7 +5,7 @@ from streamlit_folium import st_folium
 from jinja2 import Template
 
 from utils.config import MAP_DATA, read_data, TARGET_COLUMN
-from components import TimeSlider
+from components import TimeSlider, SimulationChart
 
 # Please use "streamlit run main.py" to run this app
 
@@ -53,7 +53,8 @@ for index, row in MAP_DATA.iterrows():
 # Render the map in Streamlit
 st_folium(m, width=725)
 
-vierlinden_data = read_data()
+vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
+
 st.dataframe(vierlinden_data)
 
 # Initialize the time slider component
@@ -66,7 +67,7 @@ current_idx, current_timestamp = time_slider.render(
     show_controls=True,
     show_current_info=True,
     hours_per_second=10.0,  # 10 hours pass per real second
-    renders_per_second=1.0  # Update display 1 time per second
+    renders_per_second=2.0  # Update display 1 time per second
 )
 
 # Use the values directly returned from TimeSlider for immediate synchronization
@@ -90,45 +91,14 @@ with st.expander("View Full Current Row Data"):
 # Add a visual indicator for the current position
 st.write(f"📍 **Current Position:** {current_timestamp.strftime('%Y-%m-%d %H:%M')} - **{TARGET_COLUMN}:** {current_value:.2f}")
 
-# Optional: You could also show a line chart with the current point highlighted
-if st.checkbox("Show detailed view with current point"):
-    try:
-        import plotly.graph_objects as go
-        
-        fig = go.Figure()
-        
-        # Add the main data
-        fig.add_trace(go.Scatter(
-            x=vierlinden_data.index,
-            y=vierlinden_data[TARGET_COLUMN],
-            mode='lines',
-            name=TARGET_COLUMN,
-            line=dict(color='blue')
-        ))
-        
-        # Add current point using direct values from TimeSlider
-        fig.add_trace(go.Scatter(
-            x=[current_timestamp],
-            y=[current_value],
-            mode='markers',
-            name='Current Position',
-            marker=dict(color='red', size=10, symbol='circle')
-        ))
-        
-        fig.update_layout(
-            title=f"{TARGET_COLUMN} Over Time",
-            xaxis_title="Time",
-            yaxis_title=TARGET_COLUMN,
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    except ImportError:
-        st.warning("Plotly not available. Install plotly for enhanced visualization: `pip install plotly`")
-        # Fallback to basic line chart
-        chart_data_with_marker = vierlinden_data[TARGET_COLUMN].copy()
-        st.line_chart(chart_data_with_marker, use_container_width=True, height=400)
-
+# Initialize and render the simulation chart component
+simulation_chart = SimulationChart()
+simulation_chart.render(
+    data=vierlinden_data,
+    current_timestamp=current_timestamp,
+    current_value=current_value,
+    target_column=TARGET_COLUMN
+)
 
 # Check if autoplay is active and trigger rerun from main.py
 if st.session_state.get("main_timeline_autoplay", False):
