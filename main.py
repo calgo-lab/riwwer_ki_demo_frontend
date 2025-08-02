@@ -92,7 +92,7 @@ with st.expander("View Full Current Row Data"):
 st.write(f"📍 **Current Position:** {current_timestamp.strftime('%Y-%m-%d %H:%M')} - **{TARGET_COLUMN}:** {current_value:.2f}")
 
 # Initialize and render the simulation chart component
-simulation_chart = SimulationChart()
+simulation_chart = SimulationChart(key=f"simulation_chart_{TARGET_COLUMN}", interactive=True)
 simulation_chart.render(
     data=vierlinden_data,
     current_timestamp=current_timestamp,

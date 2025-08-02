@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from typing import Optional
+import time
 
 
 class SimulationChart:
@@ -31,11 +32,12 @@ class SimulationChart:
         ```
     """
     
-    def __init__(self):
+    def __init__(self, key: str, interactive: bool = False):
         """Initialize the SimulationChart component."""
-        pass
-    
-    def render(self, 
+        self.key = key
+        self.interactive = interactive
+
+    def render(self,
                data: pd.DataFrame,
                current_timestamp: pd.Timestamp,
                current_value: float,
@@ -43,7 +45,8 @@ class SimulationChart:
                title: Optional[str] = None,
                height: int = 500,
                show_checkbox: bool = True,
-               checkbox_label: str = "Show simulation view (72h window)") -> None:
+               checkbox_label: str = "Show simulation view (72h window)",
+               iteration: Optional[int] = None) -> None:
         """
         Render the simulation chart component.
         
@@ -59,7 +62,11 @@ class SimulationChart:
         """
         # Show checkbox if requested
         if show_checkbox:
-            if not st.checkbox(checkbox_label):
+            # Create simple stable checkbox key that doesn't change during the session
+            # Use only the chart's base key to avoid duplication and ensure stability
+            checkbox_key = f"{self.key}_checkbox"
+            
+            if not st.checkbox(checkbox_label, key=checkbox_key):
                 return
         
         try:
@@ -69,7 +76,8 @@ class SimulationChart:
                 current_value=current_value,
                 target_column=target_column,
                 title=title,
-                height=height
+                height=height,
+                iteration=iteration
             )
         except ImportError:
             st.warning("Plotly not available. Install plotly for enhanced visualization: `pip install plotly`")
@@ -81,7 +89,8 @@ class SimulationChart:
                      current_value: float,
                      target_column: str,
                      title: Optional[str] = None,
-                     height: int = 500) -> None:
+                     height: int = 500,
+                     iteration: Optional[int] = None) -> None:
         """Create the main plotly chart."""
         fig = go.Figure()
         
@@ -174,9 +183,21 @@ class SimulationChart:
             actual_window_start=actual_window_start
         )
         
+        if self.interactive:
+            # Create a unique key based on iteration count if available, otherwise fallback to timestamp
+            if iteration is not None:
+                key = f"simulation_chart_iter_{iteration}"
+            else:
+                # Fallback to timestamp-based key
+                timestamp_str = current_timestamp.strftime('%Y%m%d_%H%M%S')
+                value_hash = hash(f"{current_value}_{target_column}") % 10000
+                key = f"simulation_chart_{timestamp_str}_{value_hash}"
+        else:
+            key = self.key
+        
         # Render the chart
-        st.plotly_chart(fig, use_container_width=True)
-    
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
     def _add_visual_elements(self,
                            fig: go.Figure,
                            historical_data: pd.DataFrame,
