@@ -1,12 +1,17 @@
-<b>Location:</b><br> {{INFO}}
-<br>
-<b>Coordinates:</b><br>
-Latitude: {{LAT}}<br>
-Longitude: {{LON}}
-<br>
-<b>Sensors:</b>
-<ul>
-{% for sensor in SENSORS %}
-    <li>{{ sensor }}</li>
-{% endfor %}
-</ul>
+<div style="font-family: Arial, sans-serif; font-size: 14px; max-width: 280px; word-wrap: break-word;">
+    <div style="font-size: 15px; font-weight: bold;">
+        📍 {{ INFO }} <span style="color: #555;">[{{ LAT }}, {{ LON }}]</span>
+    </div>
+
+    <div style="margin-top: 8px; font-weight: bold;">📡 Sensors:</div>
+    <ul style="padding-left: 20px; margin-top: 5px;">
+        {% for sensor in SENSORS %}
+        <li style="margin-bottom: 4px;">
+            🔧 <span title="{{ sensor }}"
+                style="display:inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;">
+                {{ sensor }}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>

@@ -71,7 +71,7 @@ sensor_categories = {
         "Herzog_Berechnete_Durchflussmenge_pval",
         "FLP_Durchfluss_SWP1_und_SWP2_pval",
         "PV_15_Entleerung_RUEB_ival",
-        "PV_16_Regenueberlauf_Menge_ival",
+        "PV_16_Regenueberlauf_Menge_ival",  # overflow
     ],
     "Pump": [
         "FLP_P3_pval",
