@@ -1,10 +1,12 @@
+import folium
 import streamlit as st
 import pandas as pd
-import folium
-from streamlit_folium import st_folium
 from jinja2 import Template
+import plotly.graph_objects as go
+from streamlit_folium import st_folium
 
 from utils.config import MAP_DATA, read_data, TARGET_COLUMN
+from utils.dynamic_map_data import build_dynamic_map_data, load_map_data
 from components import TimeSliderLive, SimulationChart
 
 # Please use "streamlit run main_live.py" to run this app
@@ -26,31 +28,39 @@ tab1, tab2 = st.tabs(["📍 Map View", "⚡ Live Dashboard"])
 
 # Add markers with click-popups
 with tab1:
+
+    # -------------------------------------------------------
     st.subheader("Map of Locations")
 
-    # Calculate the center of the bounding box for the map view
-    center_lat = (MAP_DATA["latitude"].min() + MAP_DATA["latitude"].max()) / 2
-    center_lon = (MAP_DATA["longitude"].min() + MAP_DATA["longitude"].max()) / 2
+    now = pd.Timestamp(
+        "2021-08-01 01:30:10"
+    )  # TODO: @Vipin, replace with time from slider
+    map_data = load_map_data()
+    MAP_DATA_DYNAMIC = build_dynamic_map_data(map_data, now)
 
-    # Create a folium map
+    center_lat = (
+        MAP_DATA_DYNAMIC["latitude"].min() + MAP_DATA_DYNAMIC["latitude"].max()
+    ) / 2
+    center_lon = (
+        MAP_DATA_DYNAMIC["longitude"].min() + MAP_DATA_DYNAMIC["longitude"].max()
+    ) / 2
+
     m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
 
-    # Load the HTML template for the popup
     with open("templates/popup.html") as f:
         popup_template = Template(f.read())
 
-    # Add markers with click-popups
-    for index, row in MAP_DATA.iterrows():
-
+    for _, row in MAP_DATA_DYNAMIC.iterrows():
         lat = row["latitude"]
         lon = row["longitude"]
         location_name = row["info"]
+        sensor_statuses = [(s["Sensor"], s["Status"]) for s in row["sensor_statuses"]]
 
         popup_html = popup_template.render(
             INFO=location_name,
             LAT=f"{lat:.2f}",
             LON=f"{lon:.2f}",
-            SENSORS=row["sensor_groups"],
+            SENSORS=sensor_statuses,
         )
 
         folium.Marker(
@@ -63,25 +73,117 @@ with tab1:
             location=[lat, lon],
             icon=folium.DivIcon(
                 html=f"""
-                <div style="
-                    position: relative;
-                    transform: translate(-50%, -50px);
-                    z-index: 1000;
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: darkred;
-                    white-space: nowrap;
-                    background: rgba(255, 255, 255, 0.6);
-                    padding: 0px 3px;
-                    border-radius: 3px;
-                ">
+                <div style="position: relative; transform: translate(-50%, -50px);
+                z-index: 1000; font-size: 12px; font-weight: bold; color: darkred;
+                white-space: nowrap; background: rgba(255, 255, 255, 0.6);
+                padding: 0px 3px; border-radius: 3px;">
                     {location_name}
                 </div>
-            """
+                """
             ),
         ).add_to(m)
-    # Render the map in Streamlit
-    st_folium(m, width=725)
+
+    st_folium(m, width=725, height=500)
+
+    # -------------------------------------------------------
+    map_data_filtered = map_data[map_data["Datetime"] <= now]
+    df_plot = map_data_filtered.set_index("Datetime")
+
+    # -------------------------------------------------------
+    st.subheader("Regional Rainfall")
+
+    rainfall_cols = ["Niederschlag_mm", "Niederschlag_Vorhersage_mm"]
+    available_cols = [col for col in rainfall_cols if col in df_plot.columns]
+
+    if available_cols:
+        fig = go.Figure()
+        for col in available_cols:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot.index,
+                    y=df_plot[col].fillna(0),
+                    mode="lines",
+                    name=col,
+                )
+            )
+        fig.update_layout(
+            title="🌧️ Rainfall Overview (Historical & Forecast)",
+            xaxis_title="Time",
+            yaxis_title="Rainfall (mm)",
+            height=300,
+            margin=dict(t=30, b=30),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    # -------------------------------------------------------
+    st.markdown(
+        "<hr style='margin-top: -10px; margin-bottom: 10px;'>", unsafe_allow_html=True
+    )
+    st.subheader("Sensor Trends by Location")
+
+    for index, row in MAP_DATA_DYNAMIC.iterrows():
+        location = row["info"]
+        sensor_statuses = row["sensor_statuses"]
+
+        if not sensor_statuses or not isinstance(sensor_statuses[0], dict):
+            continue
+
+        sensor_names = [s["Sensor"] for s in sensor_statuses]
+
+        with st.expander(
+            f"📍 {location} — {len(sensor_names)} sensors", expanded=False
+        ):
+            for sensor in sensor_names:
+                if sensor in df_plot.columns:
+                    y_values = df_plot[sensor]
+                    y_values = df_plot[sensor].fillna(0)
+
+                    mean = y_values.mean()
+                    std = y_values.std()
+                    z_scores = (y_values - mean) / std
+                    anomalies = (
+                        z_scores.abs() > 3
+                    )  # threshold is bigger, so fewer anomalies
+
+                    sensor_status = next(
+                        (s["Status"] for s in sensor_statuses if s["Sensor"] == sensor),
+                        "UNKNOWN",
+                    )
+                    status_icon = (
+                        "🟢"
+                        if sensor_status == "active"
+                        else "🔴" if sensor_status == "inactive" else "❓"
+                    )
+
+                    fig = go.Figure()
+                    fig.add_trace(  # normal
+                        go.Scatter(
+                            x=y_values.index,
+                            y=y_values,
+                            mode="lines",
+                            name=sensor,
+                            line=dict(color="blue"),
+                        )
+                    )
+                    fig.add_trace(  # anomalies
+                        go.Scatter(
+                            x=y_values.index[anomalies],
+                            y=y_values[anomalies],
+                            mode="markers",
+                            name="Anomalies",
+                            marker=dict(color="red", size=8, symbol="circle"),
+                        )
+                    )
+
+                    fig.update_layout(
+                        title=f"{status_icon} {sensor} @ {location}",
+                        xaxis_title="Time",
+                        yaxis_title="Sensor Value",
+                        height=300,
+                        margin=dict(t=30, b=30),
+                    )
+                    st.plotly_chart(
+                        fig, use_container_width=True, key=f"{location}_{sensor}"
+                    )
 
 with tab2:
     st.subheader("Live Time Series Dashboard")

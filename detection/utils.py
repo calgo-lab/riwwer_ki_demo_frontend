@@ -9,7 +9,7 @@ def load_data():
     return df
 
 
-def check_one_sensor_status(
+def get_sensor_status(
     df: pd.DataFrame, sensor_name: str, now: pd.Timestamp, defined_interval: int = 60
 ) -> dict:
 

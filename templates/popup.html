@@ -7,9 +7,14 @@
     <ul style="padding-left: 20px; margin-top: 5px;">
         {% for sensor in SENSORS %}
         <li style="margin-bottom: 4px;">
-            🔧 <span title="{{ sensor }}"
+            {% if sensor[1] == 'active' %}
+            🟢
+            {% else %}
+            🔴
+            {% endif %}
+            <span title="{{ sensor[0] }}"
                 style="display:inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;">
-                {{ sensor }}
+                {{ sensor[0] }}
             </span>
         </li>
         {% endfor %}

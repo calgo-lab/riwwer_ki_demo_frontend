@@ -16,7 +16,7 @@ SENSOR_GROUPS = {
     "Kläranlage": [
         "Niederschlag_mm",
         "PV_15_Entleerung_RUEB_ival",
-        "PV_16_Regenueberlauf_Menge_ival",
+        # "PV_16_Regenueberlauf_Menge_ival", # defined overflow, exclude it
         "PV_18_Fuellstand_RUEB_1_ival",
         "PV_19_Fuellstand_RUEB_2_ival",
         "PV_20_Fuellstand_RUEB_3_ival",
@@ -48,7 +48,7 @@ SENSOR_GROUPS = {
         "Herzog_Oberwasser_pval",
         "Herzog_Unterwasser_pval",
         "Herzog_Durchflußmenge_pval",
-        "Herzog_Berechnete_Durchflussmenge_pval",
+        # "Herzog_Berechnete_Durchflussmenge_pval", # theretically calculated, exclude it
     ],
     "Franz Lenze Platz": [
         "FLP_Hohenstand_Pumpensumpf_pval",
