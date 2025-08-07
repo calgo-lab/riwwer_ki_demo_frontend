@@ -184,14 +184,12 @@ class SimulationChart:
         )
         
         if self.interactive:
-            # Create a unique key based on iteration count if available, otherwise fallback to timestamp
+            # Create a unique key based on iteration count if available, otherwise fallback to stable key
             if iteration is not None:
-                key = f"simulation_chart_iter_{iteration}"
+                key = f"{self.key}_iter_{iteration}"
             else:
-                # Fallback to timestamp-based key
-                timestamp_str = current_timestamp.strftime('%Y%m%d_%H%M%S')
-                value_hash = hash(f"{current_value}_{target_column}") % 10000
-                key = f"simulation_chart_{timestamp_str}_{value_hash}"
+                # Use base key to avoid hash collisions
+                key = f"{self.key}_interactive"
         else:
             key = self.key
         

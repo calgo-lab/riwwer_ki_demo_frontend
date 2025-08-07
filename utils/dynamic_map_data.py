@@ -59,3 +59,38 @@ def build_dynamic_map_data(df: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def build_dynamic_map_data_from_row(df: pd.DataFrame, current_row: pd.Series, now: pd.Timestamp) -> pd.DataFrame:
+    """
+    Optimized version that uses the current data row instead of reprocessing all data.
+    This is more efficient for live dashboard updates.
+    """
+    rows = []
+    for location, coords in COORDINATES_DICT.items():
+        sensor_list = SENSOR_GROUPS[location]
+        sensor_info = []
+        for sensor in sensor_list:
+            if sensor in current_row.index and pd.notna(current_row[sensor]):
+                # Use current row data for active sensors
+                status_dict = {
+                    "Sensor": sensor,
+                    "Status": "active",
+                    "Value": current_row[sensor],
+                    "LastValidDataTime": now.strftime("%Y-%m-%d-%H:%M:%S"),
+                    "TimeSinceLastValidData": "0:00:00",
+                }
+            else:
+                # Fall back to the original method for inactive sensors
+                status_dict = get_sensor_status(df, sensor, now)
+            sensor_info.append(status_dict)
+
+        rows.append(
+            {
+                "latitude": coords[1],
+                "longitude": coords[0],
+                "info": location,
+                "sensor_statuses": sensor_info,
+            }
+        )
+    return pd.DataFrame(rows)
