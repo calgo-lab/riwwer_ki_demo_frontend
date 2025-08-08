@@ -4,12 +4,27 @@ import pandas as pd
 from jinja2 import Template
 import plotly.graph_objects as go
 from streamlit_folium import st_folium
+from streamlit.errors import StreamlitDuplicateElementKey
 
 from utils.config import MAP_DATA, read_data, TARGET_COLUMN
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart
 
-# Please use "streamlit run main_live_clean.py" to run this app
+# Debugging
+if "debugpy_initialized" not in st.session_state:
+    try:
+        import debugpy
+        
+        if not debugpy.is_client_connected():
+            debugpy.listen(("localhost", 5678))
+            print("Debugger listening on port 5678...")
+        st.session_state.debugpy_initialized = True
+    except ImportError:
+        print("Debugging not available. Install debugpy for remote debugging.")
+        st.session_state.debugpy_initialized = True
+    except Exception as e:
+        print(f"Error initializing debugger: {e}")
+        st.session_state.debugpy_initialized = True
 
 st.set_page_config(
     page_title="RIWWER KI Demo - Live Dashboard",
@@ -137,7 +152,7 @@ def advanced_content_renderer(
     # Left column: Interactive Map (render second to avoid blocking chart)
     with map_col:
         if show_map:
-            st.markdown("**📍 Real-time Map**")
+            st.markdown("**📍 Real-time Map**")        
             
             # Build optimized dynamic map data using current row
             MAP_DATA_DYNAMIC = build_dynamic_map_data_from_row(map_data, data_row, timestamp)
@@ -211,7 +226,7 @@ def advanced_content_renderer(
                     ),
                 )
                 fg.add_child(label_marker)
-
+            
             # Use dynamic st_folium with stable key but unique feature group
             st_folium(
                 base_map,
@@ -220,7 +235,7 @@ def advanced_content_renderer(
                 feature_group_to_add=fg,
                 width=600, 
                 height=400,
-                key="live_map_dynamic_advanced"  # Keep stable key to avoid flickering
+                key="live_map_dynamic_advanced"
             )
             
             # Add compact legend for marker colors
@@ -364,18 +379,4 @@ time_slider.run_live_dashboard(
     show_controls=True,
     show_progress=True,
     max_iterations=2000,
-)
-
-# Add footer
-st.markdown("---")
-st.markdown("**🔥 Performance Benefits:**")
-st.markdown(
-    """
-- ✅ No page refreshes (uses `st.empty()` placeholder pattern)
-- ✅ Smooth real-time updates with optimized map data loading
-- ✅ Lower CPU usage compared to `st.rerun()`
-- ✅ Better user experience with continuous playback
-- ✅ Configurable update rates and speeds
-- ✅ Integrated map and simulation chart views
-"""
 )
