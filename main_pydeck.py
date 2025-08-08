@@ -47,9 +47,22 @@ with col3:
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
 simulation_chart = SimulationChart(key="pydeck_simulation_chart", interactive=True)
 
-# Pre-calculate map center for performance 
-center_lat = sum(coord[1] for coord in COORDINATES_DICT.values()) / len(COORDINATES_DICT)
-center_lon = sum(coord[0] for coord in COORDINATES_DICT.values()) / len(COORDINATES_DICT)
+# Pre-calculate map center based on bounding box (not just coordinate average)
+# Get min/max bounds of all locations
+lats = [coord[1] for coord in COORDINATES_DICT.values()]
+lons = [coord[0] for coord in COORDINATES_DICT.values()]
+
+min_lat, max_lat = min(lats), max(lats)
+min_lon, max_lon = min(lons), max(lons)
+
+# Calculate true geographic center of bounding box
+center_lat = (min_lat + max_lat) / 2
+center_lon = (min_lon + max_lon) / 2
+
+# Optional: Calculate optimal zoom level based on bounding box size
+lat_range = max_lat - min_lat
+lon_range = max_lon - min_lon
+max_range = max(lat_range, lon_range)
 
 # ========== MARKER SIZE CONFIGURATION ==========
 # Adjust these values to fine-tune marker appearance
@@ -98,7 +111,7 @@ def prepare_map_data(data_row, timestamp):
         # Calculate status metrics
         active_sensors = sum(1 for s in sensor_statuses if s["Status"] == "active")
         total_sensors = len(sensor_statuses)
-        activity_ratio = active_sensors / max(total_sensors, 1)
+        activity_percentage = 100 * (active_sensors / max(total_sensors, 1))
         
         # Use consistent sizes for all markers
         base_size = BASE_MARKER_SIZE
@@ -115,8 +128,9 @@ def prepare_map_data(data_row, timestamp):
             'color': color,
             'size': base_size,  # Same for all locations
             'active_sensors': active_sensors,
+            'inactive_sensors': total_sensors - active_sensors,
             'total_sensors': total_sensors,
-            'activity_ratio': activity_ratio,
+            'activity_percentage': activity_percentage,
             'elevation': 0
         })
         
@@ -129,8 +143,9 @@ def prepare_map_data(data_row, timestamp):
             'color': ring_color,
             'size': ring_size,  # Consistent ring size
             'active_sensors': active_sensors,
+            'inactive_sensors': total_sensors - active_sensors,
             'total_sensors': total_sensors,
-            'activity_ratio': activity_ratio,
+            'activity_percentage': activity_percentage,
             'elevation': 5
         })
         
@@ -142,16 +157,17 @@ def prepare_map_data(data_row, timestamp):
             'color': [255, 255, 255, 255],  # White center
             'size': icon_size,  # Consistent icon size
             'active_sensors': active_sensors,
+            'inactive_sensors': total_sensors - active_sensors,
             'total_sensors': total_sensors,
-            'activity_ratio': activity_ratio,
+            'activity_percentage': activity_percentage,
             'elevation': 10
         })
         
         # 4. Labels with better positioning
         if show_labels:
             # Determine label color based on activity
-            label_color = [255, 255, 255, 255] if activity_ratio > 0.5 else [0, 0, 0, 255]
-            label_bg_color = [0, 0, 0, 180] if activity_ratio > 0.5 else [255, 255, 255, 200]
+            label_color = [255, 255, 255, 255] if activity_percentage > 0.5 else [0, 0, 0, 255]
+            label_bg_color = [0, 0, 0, 180] if activity_percentage > 0.5 else [255, 255, 255, 200]
             
             label_points.append({
                 'lon': lon,
@@ -161,6 +177,7 @@ def prepare_map_data(data_row, timestamp):
                 'color': label_color,
                 'background_color': label_bg_color,
                 'active_sensors': active_sensors,
+                'inactive_sensors': total_sensors - active_sensors,
                 'total_sensors': total_sensors
             })
     
@@ -192,16 +209,16 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         progress_pct = (idx / max(1, len(vierlinden_data) - 1)) * 100
         st.metric("Progress", f"{progress_pct:.1f}%")
 
-    # Main content area: Map and Simulation Chart side-by-side
+    # Main content area: Split into three columns for better layout
     st.subheader("🗺️ Live Map & Simulation View")
     
-    # Create two columns for side-by-side layout
-    map_col, chart_col = st.columns([1, 1], gap="medium")
+    # Create three columns: Map | Overview | Chart
+    map_col, overview_col, chart_col = st.columns([1.4, 0.5, 2], gap="small")
 
     # Left column: Interactive Map with Pydeck (smooth updates)
     with map_col:
         if show_map:
-            st.markdown("**📍 Real-time Sensor Map (Enhanced Markers)**")
+            st.markdown("**📍 Real-time Sensor Map**")
             
             # Prepare enhanced map data with multiple layers
             marker_base_data, marker_ring_data, marker_icon_data, label_data = prepare_map_data(data_row, timestamp)
@@ -294,7 +311,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             view_state = pdk.ViewState(
                 latitude=center_lat,
                 longitude=center_lon,
-                zoom=13,
+                zoom=13.25,
                 pitch=0,  # Slight 3D angle to show elevation
                 bearing=0
             )
@@ -307,8 +324,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                         <div style="background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px;">
                             <b>📍 {location}</b><br/>
                             <span style="color: #4CAF50;">●</span> Active: {active_sensors}<br/>
-                            <span style="color: #FF5722;">●</span> Total: {total_sensors}<br/>
-                            <span style="color: #2196F3;">📊</span> Status: {activity_ratio:.0%}
+                            <span style="color: #FF5722;">●</span> Inactive: {inactive_sensors}
                         </div>
                     ''',
                     'style': {
@@ -320,34 +336,36 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             
             # This is the key - using a unique key based on iteration prevents flickering
             st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
-            
-            # Enhanced legend with status indicators
-            st.markdown("---")
-            legend_col1, legend_col2 = st.columns(2)
-            with legend_col1:
-                st.markdown("""
-                **🎯 Marker Status:**  
-                🟢 **All Sensors Active**  
-                🟠 **Partially Active**  
-                🔴 **All Sensors Inactive**  
-                ⚫ **No Sensor Data**
-                """)
-            with legend_col2:
-                # Show current overall status
-                total_locations = len(marker_base_data)
-                active_locations = len(marker_base_data[marker_base_data['activity_ratio'] == 1.0])
-                partial_locations = len(marker_base_data[(marker_base_data['activity_ratio'] > 0) & (marker_base_data['activity_ratio'] < 1.0)])
-                inactive_locations = len(marker_base_data[marker_base_data['activity_ratio'] == 0])
-                
-                st.markdown(f"""
-                **� Current Overview:**  
-                🟢 {active_locations} fully active  
-                🟠 {partial_locations} partially active  
-                🔴 {inactive_locations} inactive  
-                📍 {total_locations} total locations
-                """)
         else:
             st.info("Map display is disabled. Enable it in the configuration above.")
+
+    # Middle column: Current Overview & Legend
+    with overview_col:
+        st.markdown("**📊 Current Overview**")
+        
+        if show_map:
+            # Get the map data for overview calculations
+            marker_base_data, _, _, _ = prepare_map_data(data_row, timestamp)
+            
+            # Calculate overview statistics
+            total_locations = len(marker_base_data)
+            active_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 100])
+            partial_locations = len(marker_base_data[(marker_base_data['activity_percentage'] > 0) & (marker_base_data['activity_percentage'] < 100)])
+            inactive_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 0])
+            
+            # Display as metrics
+            st.metric("📍 Total Locations", total_locations)
+            st.metric("🟢 Fully Active", active_locations)
+            st.metric("🟠 Partially Active", partial_locations) 
+            st.metric("🔴 Inactive", inactive_locations)
+            
+            # Calculate overall network health
+            if total_locations > 0:
+                network_health = ((active_locations * 100) + (partial_locations * 50)) / total_locations
+                st.markdown("---")
+                st.metric("🎯 Network Health", f"{network_health:.1f}%")
+        else:
+            st.info("Enable map to see overview statistics")
 
     # Right column: Simulation Chart  
     with chart_col:
@@ -360,6 +378,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 target_column=TARGET_COLUMN,
                 iteration=iteration,
                 show_checkbox=False,  # Disable internal checkbox to avoid conflicts
+                height=600
             )
         else:
             st.info("Chart display is disabled. Enable it in the configuration above.")
