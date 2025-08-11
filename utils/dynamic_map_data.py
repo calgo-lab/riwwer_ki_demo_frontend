@@ -1,11 +1,17 @@
 import pandas as pd
-from utils.config import COORDINATES_DICT, SENSOR_GROUPS
+from utils.config import COORDINATES_DICT, SENSOR_GROUPS, DATA_PATH
 
 
 def load_map_data():
-    df = pd.read_csv("data/vierlinden_21_22_23_all_with_forecast.csv")
-    df["Datetime"] = pd.to_datetime(df["Datetime"])
-    return df
+    data = pd.read_csv(
+        DATA_PATH,
+        parse_dates=[0],
+        index_col=0,
+    )
+    data.index.name = "Datetime"
+    data.reset_index(inplace=True) # Is this needed?
+    
+    return data
 
 
 def get_sensor_status(

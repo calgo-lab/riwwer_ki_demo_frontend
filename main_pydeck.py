@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import pydeck as pdk
 import time
+import plotly.graph_objs as go
+import altair as alt
 from utils.config import read_data, TARGET_COLUMN, MAP_DATA, COORDINATES_DICT, SENSOR_GROUPS
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart
@@ -17,7 +19,7 @@ st.write("High-performance real-time dashboard with smooth, non-flickering map u
 
 # Load data
 vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
-map_data = load_map_data()
+map_data = load_map_data() # Why not just use vierlinden_data directly?
 
 # Show data overview
 with st.expander("📊 Data Overview", expanded=False):
@@ -319,19 +321,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             deck = pdk.Deck(
                 layers=layers,
                 initial_view_state=view_state,
-                tooltip={
-                    'html': '''
-                        <div style="background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px;">
-                            <b>📍 {location}</b><br/>
-                            <span style="color: #4CAF50;">●</span> Active: {active_sensors}<br/>
-                            <span style="color: #FF5722;">●</span> Inactive: {inactive_sensors}
-                        </div>
-                    ''',
-                    'style': {
-                        'backgroundColor': 'transparent',
-                        'border': 'none'
-                    }
-                }
+                tooltip=True
             )
             
             # This is the key - using a unique key based on iteration prevents flickering
@@ -382,6 +372,107 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             )
         else:
             st.info("Chart display is disabled. Enable it in the configuration above.")
+
+    # New row below the map: Sensor trends by location (half width)
+    st.markdown("---")
+    details_col, _ = st.columns([1, 1], gap="medium")
+    with details_col:
+        if show_map:
+            st.subheader("📊 Sensor Trends by Location")
+            # Filter data up to current timestamp
+            try:
+                map_data_filtered = map_data[map_data["Datetime"] <= timestamp]
+                df_plot = map_data_filtered.set_index("Datetime")
+            except Exception:
+                df_plot = pd.DataFrame()
+
+            dynamic_df = build_dynamic_map_data_from_row(map_data, data_row, timestamp)
+
+            for _, row in dynamic_df.iterrows():
+                location = row["info"]
+                sensor_statuses = row.get("sensor_statuses", [])
+                if not sensor_statuses or not isinstance(sensor_statuses[0], dict):
+                    continue
+
+                sensor_names = [s.get("Sensor") for s in sensor_statuses if isinstance(s, dict) and "Sensor" in s]
+
+                with st.expander(f"📍 {location} — {len(sensor_names)} sensors", expanded=False):
+                    base_key = f"sensor_trends_{location}"                    
+                    widget_key = f"{base_key}_{iteration}"
+
+                    # Only render charts on demand to reduce lag
+                    render_charts = st.checkbox(
+                        "Render charts for this location",
+                        value=st.session_state.get(base_key, False),
+                        key=widget_key,
+                        help="Enable to render time-series charts for all sensors at this location"
+                    )
+                    st.session_state[base_key] = render_charts
+
+                    if render_charts:
+                        for sensor in sensor_names:
+                            if df_plot is not None and not df_plot.empty and sensor in df_plot.columns:
+                                y_values = df_plot[sensor].fillna(0)
+                                if len(y_values) > 0:
+                                    mean = y_values.mean()
+                                    std = y_values.std()
+                                    if std > 0:
+                                        z_scores = (y_values - mean) / std
+                                        anomalies = (z_scores.abs() > 3)
+                                    else:
+                                        anomalies = pd.Series([False] * len(y_values), index=y_values.index)
+
+                                    sensor_status = next(
+                                        (s.get("Status") for s in sensor_statuses if s.get("Sensor") == sensor),
+                                        "UNKNOWN",
+                                    )
+                                    status_icon = (
+                                        "🟢" if sensor_status == "active" else ("🔴" if sensor_status == "inactive" else "❓")
+                                    )
+
+                                    # Build Altair chart for performance
+                                    df_sensor = y_values.reset_index()
+                                    df_sensor.columns = ["Datetime", "value"]
+                                    df_sensor["anomaly"] = anomalies.values
+
+                                    line = (
+                                        alt.Chart(df_sensor)
+                                        .mark_line(color="#1f77b4")
+                                        .encode(
+                                            x=alt.X("Datetime:T", title="Time"),
+                                            y=alt.Y("value:Q", title="Sensor Value"),
+                                            tooltip=[
+                                                alt.Tooltip("Datetime:T", title="Time"),
+                                                alt.Tooltip("value:Q", title="Value", format=".2f"),
+                                            ],
+                                        )
+                                    )
+
+                                    if df_sensor["anomaly"].any():
+                                        anomalies_df = df_sensor[df_sensor["anomaly"]]
+                                        points = (
+                                            alt.Chart(anomalies_df)
+                                            .mark_point(color="red", size=60, filled=True)
+                                            .encode(
+                                                x="Datetime:T",
+                                                y="value:Q",
+                                                tooltip=[
+                                                    alt.Tooltip("Datetime:T", title="Anomaly Time"),
+                                                    alt.Tooltip("value:Q", title="Anomaly Value", format=".2f"),
+                                                ],
+                                            )
+                                        )
+                                        chart = (line + points).properties(
+                                            title=f"{status_icon} {sensor} @ {location}", height=300
+                                        )
+                                    else:
+                                        chart = line.properties(
+                                            title=f"{status_icon} {sensor} @ {location}", height=300
+                                        )
+
+                                    st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("Enable map to see location details")
 
 # Run the smooth live dashboard using TimeSliderLive
 time_slider.run_live_dashboard(
