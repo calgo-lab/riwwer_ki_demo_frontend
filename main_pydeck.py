@@ -4,7 +4,7 @@ import pydeck as pdk
 import time
 import plotly.graph_objs as go
 import altair as alt
-from utils.config import read_data, TARGET_COLUMN, MAP_DATA, COORDINATES_DICT, SENSOR_GROUPS, calculate_target_column_bounds
+from utils.config import read_data, TARGET_COLUMN, MAP_DATA, COORDINATES_DICT, SENSOR_GROUPS, calculate_target_column_bounds, RAINFALL_COLUMN
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart
 
@@ -203,7 +203,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     st.subheader("📊 Current Data Point")
 
     # Metrics in columns
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Index", f"{idx + 1:,} / {len(vierlinden_data):,}")
     with col2:
@@ -213,6 +213,15 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         current_value = data_row[TARGET_COLUMN]
         st.metric(TARGET_COLUMN, f"{current_value:.2f}")
     with col4:
+        # Rainfall value (if available)
+        try:
+            if RAINFALL_COLUMN in data_row.index and pd.notna(data_row[RAINFALL_COLUMN]):
+                st.metric(RAINFALL_COLUMN, f"{float(data_row[RAINFALL_COLUMN]):.2f}")
+            else:
+                st.metric(RAINFALL_COLUMN, "-")
+        except Exception:
+            st.metric("Rainfall", "-")
+    with col5:
         # Calculate progress percentage
         progress_pct = (idx / max(1, len(vierlinden_data) - 1)) * 100
         st.metric("Progress", f"{progress_pct:.1f}%")
@@ -503,25 +512,3 @@ time_slider.run_live_dashboard(
     show_progress=True,
     max_iterations=2000,
 )
-
-# Performance info
-st.sidebar.markdown("### 🚀 Performance Features")
-st.sidebar.markdown("""
-- **Pydeck GPU acceleration** for smooth rendering
-- **TimeSliderLive pattern** prevents page flicker  
-- **Optimized data preparation** with intelligent caching
-- **Smart layer management** for reduced flickering
-- **Configurable animation speed** via native controls
-- **Fixed y-axis scaling** for consistent chart visualization
-- **Chart data caching** prevents curve disappearing
-- **Stable component keys** reduce re-rendering overhead
-""")
-
-st.sidebar.markdown("### 🎮 Controls Guide")
-st.sidebar.markdown("""
-- **Play/Pause**: Auto-animate through time
-- **Speed Dropdown**: Control animation speed (0.1x to 15x)
-- **Forward/Back**: Step manually through time
-- **Start/End**: Jump to beginning/end
-- **Map**: GPU-accelerated with preserved viewport
-""")
