@@ -1,4 +1,5 @@
 import pandas as pd
+import math
 
 # Coordinates (long, lat)
 COORDINATES_DICT = {
@@ -83,6 +84,46 @@ def read_data():
     data.index.name = "Datetime"
 
     return data
+
+
+def calculate_target_column_bounds(data: pd.DataFrame = None) -> tuple[float, float]:
+    """
+    Calculate fixed y-axis bounds for the target column.
+    Returns min and max values rounded to the nearest ±0.5.
+    
+    Args:
+        data: Optional DataFrame. If not provided, will load data using read_data()
+    
+    Returns:
+        tuple: (y_min, y_max) rounded to nearest ±0.5
+    """
+    if data is None:
+        data = read_data()
+    
+    if TARGET_COLUMN not in data.columns:
+        # Fallback bounds if target column doesn't exist
+        return -1.0, 1.0
+    
+    # Get min/max values, excluding NaN
+    target_series = data[TARGET_COLUMN].dropna()
+    if target_series.empty:
+        # Fallback bounds if no valid data
+        return -1.0, 1.0
+    
+    raw_min = target_series.min()
+    raw_max = target_series.max()
+    
+    # Round to nearest 0.5
+    # For min: round down (floor) to nearest 0.5
+    # For max: round up (ceil) to nearest 0.5
+    y_min = math.floor(raw_min * 2) / 2  # Round down to nearest 0.5
+    y_max = math.ceil(raw_max * 2) / 2   # Round up to nearest 0.5
+    
+    # Ensure there's at least 0.5 difference between min and max
+    if y_max - y_min < 0.5:
+        y_max = y_min + 0.5
+    
+    return y_min, y_max
 
 
 TARGET_COLUMN = "PV_18_Fuellstand_RUEB_1_ival"
