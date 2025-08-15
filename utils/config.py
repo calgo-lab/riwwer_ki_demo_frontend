@@ -129,3 +129,5 @@ def calculate_target_column_bounds(data: pd.DataFrame = None) -> tuple[float, fl
 TARGET_COLUMN = "PV_18_Fuellstand_RUEB_1_ival"
 
 RAINFALL_COLUMN = "Niederschlag_mm"
+
+RAINFALL_FORECAST_COLUMN = "Niederschlag_Vorhersage_mm"

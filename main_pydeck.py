@@ -4,9 +4,9 @@ import pydeck as pdk
 import time
 import plotly.graph_objs as go
 import altair as alt
-from utils.config import read_data, TARGET_COLUMN, MAP_DATA, COORDINATES_DICT, SENSOR_GROUPS, calculate_target_column_bounds, RAINFALL_COLUMN
+from utils.config import read_data, TARGET_COLUMN, MAP_DATA, COORDINATES_DICT, SENSOR_GROUPS, calculate_target_column_bounds, RAINFALL_COLUMN, RAINFALL_FORECAST_COLUMN
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
-from components import TimeSliderLive, SimulationChart
+from components import TimeSliderLive, SimulationChart, RainfallBarChart
 
 st.set_page_config(
     page_title="RIWWER KI Demo - Pydeck Dashboard",
@@ -54,6 +54,7 @@ with col3:
 # Initialize components using the smooth TimeSliderLive approach
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
 simulation_chart = SimulationChart(key="pydeck_simulation_chart", interactive=True)
+rainfall_chart = RainfallBarChart(key="pydeck_rainfall_chart")
 
 # Pre-calculate map center based on bounding box (not just coordinate average)
 # Get min/max bounds of all locations
@@ -367,18 +368,16 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             # Calculate overview statistics
             total_locations = len(marker_base_data)
             active_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 100])
-            partial_locations = len(marker_base_data[(marker_base_data['activity_percentage'] > 0) & (marker_base_data['activity_percentage'] < 100)])
             inactive_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 0])
             
             # Display as metrics
             st.metric("📍 Total Locations", total_locations)
             st.metric("🟢 Fully Active", active_locations)
-            st.metric("🟠 Partially Active", partial_locations) 
             st.metric("🔴 Inactive", inactive_locations)
             
             # Calculate overall network health
             if total_locations > 0:
-                network_health = ((active_locations * 100) + (partial_locations * 50)) / total_locations
+                network_health = ((active_locations * 100)) / total_locations
                 st.markdown("---")
                 st.metric("🎯 Network Health", f"{network_health:.1f}%")
         else:
@@ -400,6 +399,21 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             )
         else:
             st.info("Chart display is disabled. Enable it in the configuration above.")
+
+    # Full-width Rainfall Bar Chart
+    st.markdown("---")
+    st.markdown("**🌧️ Rainfall (History + 12h Forecast)**")
+    rainfall_chart.render(
+        data=vierlinden_data,
+        current_timestamp=timestamp,
+        rainfall_column=RAINFALL_COLUMN,
+        rainfall_forecast_column=RAINFALL_FORECAST_COLUMN,
+        default_history_hours=72,
+        future_hours=12,
+        height=260,
+        show_controls=True,
+        is_playing=st.session_state.get("pydeck_main_is_playing", False),
+    )
 
     # Sensor Trends by Location is bugged and makes it laggy so maybe rather not show that, at least now
     # # New row below the map: Sensor trends by location (half width)
