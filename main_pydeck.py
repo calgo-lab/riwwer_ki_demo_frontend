@@ -17,6 +17,9 @@ from utils.config import (
     PREDICTIONS_TIME_COLUMN,
     LOCAL_LSTM_PRED_COLUMN,
     LOCAL_TRANSFORMER_PRED_COLUMN,
+    GLOBAL_PREDICTIONS_PATH,
+    GLOBAL_TFT_PRED_COLUMN,
+    GLOBAL_LSTM_PRED_COLUMN,
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart, RainfallBarChart
@@ -41,6 +44,14 @@ try:
     )
 except Exception:
     local_preds = None
+
+# Load global multi-step predictions (arrays of length 12 per timestamp)
+try:
+    global_preds = pd.read_csv(
+        GLOBAL_PREDICTIONS_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN], index_col=PREDICTIONS_TIME_COLUMN
+    )
+except Exception:
+    global_preds = None
 
 # Calculate fixed y-axis bounds for consistent chart scaling
 y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
@@ -82,6 +93,7 @@ model_scope = st.radio(
     help="Global: normal operation. Local: mark all locations inactive and use local forecasts if available."
 )
 is_local_mode = (model_scope == "Local")
+is_global_mode = (model_scope == "Global")
 
 # Local model selector (only visible in Local mode)
 local_model_choice = None
@@ -93,6 +105,15 @@ if is_local_mode:
         horizontal=True,
         key="local_model_selector",
         help="Choose which local model's predictions to visualize."
+    )
+elif is_global_mode:
+    global_model_choice = st.radio(
+        "Global model",
+        options=["TFT", "LSTM"],
+        index=0,
+        horizontal=True,
+        key="global_model_selector",
+        help="Choose which global model's predictions to visualize (12-step ahead)."
     )
 
 # Initialize components using the smooth TimeSliderLive approach
@@ -453,6 +474,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             st.markdown("**📈 Simulation Chart**")
             # Compute local one-step-ahead forecast value if in Local mode
             forecast_value = None
+            forecast_series = None
             if is_local_mode and local_preds is not None:
                 try:
                     # Find t+1 timestamp based on main data index
@@ -467,6 +489,22 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                                 forecast_value = float(val[LOCAL_TRANSFORMER_PRED_COLUMN])
                 except Exception:
                     forecast_value = None
+            # Compute 12-step forecast series if in Global mode
+            if is_global_mode and global_preds is not None:
+                try:
+                    # The row at t contains [t+1..t+12]
+                    t_key = vierlinden_data.index[idx]
+                    if t_key in global_preds.index:
+                        row = global_preds.loc[t_key]
+                        col = GLOBAL_TFT_PRED_COLUMN if global_model_choice == "TFT" else GLOBAL_LSTM_PRED_COLUMN
+                        if col in row.index and isinstance(row[col], str) and row[col].startswith("["):
+                            # Parse the array-like string safely
+                            import ast
+                            arr = ast.literal_eval(row[col])
+                            if isinstance(arr, (list, tuple)) and len(arr) >= 1:
+                                forecast_series = [float(x) for x in arr[:12]]
+                except Exception:
+                    forecast_series = None
             simulation_chart.render(
                 data=vierlinden_data,
                 current_timestamp=timestamp,
@@ -476,7 +514,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 show_checkbox=False,  # Disable internal checkbox to avoid conflicts
                 y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
                 height=550,
-                forecast_value=forecast_value  # Constant forecast replicated across future window
+                forecast_value=forecast_value,  # Local one-step ahead
+                forecast_series=forecast_series   # Global multi-step ahead [t+1..t+12]
             )
         else:
             st.info("Chart display is disabled. Enable it in the configuration above.")

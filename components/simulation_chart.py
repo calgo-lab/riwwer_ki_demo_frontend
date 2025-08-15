@@ -175,7 +175,8 @@ class SimulationChart:
                checkbox_label: str = "Show simulation view (72h window)",
                iteration: Optional[int] = None,
                y_axis_bounds: Optional[tuple[float, float]] = None,
-               forecast_value: Optional[float] = None) -> None:
+               forecast_value: Optional[float] = None,
+               forecast_series: Optional[list[float]] = None) -> None:
         """
         Render the simulation chart component.
         
@@ -214,7 +215,8 @@ class SimulationChart:
                 height=height,
                 iteration=iteration,
                 y_axis_bounds=y_axis_bounds,
-                forecast_value=forecast_value
+                forecast_value=forecast_value,
+                forecast_series=forecast_series
             )
         except ImportError:
             st.warning("Altair not available. Install altair for enhanced visualization: `pip install altair`")
@@ -229,7 +231,8 @@ class SimulationChart:
                             height: int = 600,
                             iteration: Optional[int] = None,
                             y_axis_bounds: Optional[tuple[float, float]] = None,
-                            forecast_value: Optional[float] = None) -> None:
+                            forecast_value: Optional[float] = None,
+                            forecast_series: Optional[list[float]] = None) -> None:
         """Create the main altair chart with all visual elements."""
         
         # Calculate the 72-hour window ending at current time
@@ -407,6 +410,36 @@ class SimulationChart:
                 chart_elements.append(forecast_line)
             except Exception:
                 pass
+
+        # 2d. Global multi-step forecast series (t+1..t+12) — orange with markers
+        if forecast_series is not None and len(forecast_series) > 0:
+            try:
+                # Build timestamps t+1.. aligned at the data's frequency (assumed hourly)
+                steps = min(12, len(forecast_series))
+                times = [current_ts + pd.Timedelta(hours=i) for i in range(1, steps + 1)]
+                series_df = pd.DataFrame({
+                    'datetime': times,
+                    target_column: forecast_series[:steps]
+                })
+                series_line = alt.Chart(series_df).mark_line(
+                    color='#ff7f0e',
+                    strokeWidth=2.5,
+                ).encode(
+                    x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                    y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                    tooltip=[
+                        alt.Tooltip('datetime:T', title='Time'),
+                        alt.Tooltip(f'{target_column}:Q', title='Global forecast', format='.2f')
+                    ]
+                )
+                series_pts = alt.Chart(series_df).mark_point(
+                    color='#ff7f0e', size=50
+                ).encode(
+                    x='datetime:T', y=f'{target_column}:Q'
+                )
+                chart_elements.append(series_line + series_pts)
+            except Exception:
+                pass
         
         # 3. Current time vertical line
         current_line_data = pd.DataFrame({
@@ -529,7 +562,8 @@ class SimulationChart:
                      height: int = 500,
                      iteration: Optional[int] = None,
                      y_axis_bounds: Optional[tuple[float, float]] = None,
-                     forecast_value: Optional[float] = None) -> None:
+                     forecast_value: Optional[float] = None,
+                     forecast_series: Optional[list[float]] = None) -> None:
         """Create the main plotly chart."""
         fig = go.Figure()
         
@@ -594,6 +628,19 @@ class SimulationChart:
                 mode='lines',
                 name='Model forecast',
                 line=dict(color='rgb(255, 127, 14)', width=3)
+            ))
+
+        # Add global 12-step forecast series if provided
+        if forecast_series is not None and len(forecast_series) > 0:
+            steps = min(12, len(forecast_series))
+            times = [current_ts + pd.Timedelta(hours=i) for i in range(1, steps + 1)]
+            fig.add_trace(go.Scatter(
+                x=times,
+                y=forecast_series[:steps],
+                mode='lines+markers',
+                name='Global forecast',
+                line=dict(color='rgb(255, 127, 14)', width=3),
+                marker=dict(color='rgb(255, 127, 14)', size=6)
             ))
         
         # Calculate actual hours of historical data available

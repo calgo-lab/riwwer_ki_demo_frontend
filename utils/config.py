@@ -137,3 +137,8 @@ LOCAL_PREDICTIONS_PATH = "data/demo_local_predictions.csv"
 PREDICTIONS_TIME_COLUMN = "Datetime"
 LOCAL_LSTM_PRED_COLUMN = "LSTM Predictions"
 LOCAL_TRANSFORMER_PRED_COLUMN = "Transformer Predictions"
+
+# Global predictions configuration (12-step ahead arrays per timestamp)
+GLOBAL_PREDICTIONS_PATH = "data/demo_global_predictions.csv"
+GLOBAL_TFT_PRED_COLUMN = "TFT Predictions"
+GLOBAL_LSTM_PRED_COLUMN = "LSTM Predictions"
