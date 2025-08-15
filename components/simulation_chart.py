@@ -300,7 +300,7 @@ class SimulationChart:
             'y': y_domain[0],
             'y2': y_domain[1],
             'type': 'future',
-            'label': 'Future Window (No Data)'
+            'label': 'Future Window'
         })
         
         if rect_data:
@@ -354,6 +354,32 @@ class SimulationChart:
                         ]
                     )
                     chart_elements.append(historical_line)
+
+        # 2b. Ground truth future line (if available) — lighter blue, only within future window
+        try:
+            future_mask = (data.index > current_ts) & (data.index <= window_end)
+            future_df = data.loc[future_mask, [target_column]].dropna().reset_index()
+            if not future_df.empty:
+                if future_df.columns[0] != 'datetime':
+                    future_df = future_df.rename(columns={future_df.columns[0]: 'datetime'})
+
+                future_line = alt.Chart(future_df).mark_line(
+                    color='#9ecae1',  # lighter blue
+                    strokeWidth=2,
+                    interpolate='linear',
+                    strokeCap='round'
+                ).encode(
+                    x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                    y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                    tooltip=[
+                        alt.Tooltip('datetime:T', title='Time'),
+                        alt.Tooltip(f'{target_column}:Q', title=f'{target_column} (Future GT)', format='.2f')
+                    ]
+                )
+                chart_elements.append(future_line)
+        except Exception:
+            # Be resilient: if anything goes wrong, just skip future line
+            pass
         
         # 3. Current time vertical line
         current_line_data = pd.DataFrame({
@@ -516,6 +542,21 @@ class SimulationChart:
             ),
             showlegend=True
         ))
+
+        # Add ground truth future line if available within future window
+        try:
+            future_mask = (data.index > current_ts) & (data.index <= window_end)
+            future_data = data.loc[future_mask]
+            if not future_data.empty:
+                fig.add_trace(go.Scatter(
+                    x=future_data.index,
+                    y=future_data[target_column],
+                    mode='lines',
+                    name=f'{target_column} (Future GT)',
+                    line=dict(color='rgb(158, 202, 225)', width=2, dash='solid')
+                ))
+        except Exception:
+            pass
         
         # Calculate actual hours of historical data available
         if not historical_data.empty:
@@ -676,7 +717,7 @@ class SimulationChart:
         fig.add_annotation(
             x=future_start + (future_end - future_start) / 2,
             y=y_max,
-            text="Future Window<br>(No Data)",
+            text="Future Window",
             showarrow=False,
             font=dict(color="gray", size=10),
             bgcolor="white",
