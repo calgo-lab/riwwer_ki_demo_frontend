@@ -1,7 +1,9 @@
 import pandas as pd
+import streamlit as st
 from utils.config import COORDINATES_DICT, SENSOR_GROUPS, DATA_PATH
 
 
+@st.cache_data(ttl=900)
 def load_map_data():
     data = pd.read_csv(
         DATA_PATH,

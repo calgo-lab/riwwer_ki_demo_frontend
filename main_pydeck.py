@@ -25,12 +25,12 @@ from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_dat
 from components import TimeSliderLive, SimulationChart, RainfallBarChart
 
 st.set_page_config(
-    page_title="RIWWER KI Demo - Pydeck Dashboard",
+    page_title="RIWWER KI Demo",
     page_icon="⚡",
     layout="wide",
 )
 
-st.title("RIWWER KI Demo - Smooth Pydeck Dashboard")
+st.title("RIWWER KI Demo")
 st.write("High-performance real-time dashboard with smooth, non-flickering map updates using Pydeck")
 
 # Load data
@@ -38,50 +38,51 @@ vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
 map_data = load_map_data() # Why not just use vierlinden_data directly?
 
 # Load local model predictions (one-step ahead)
-try:
-    local_preds = pd.read_csv(
-        LOCAL_PREDICTIONS_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN], index_col=PREDICTIONS_TIME_COLUMN
-    )
-except Exception:
-    local_preds = None
+@st.cache_data(ttl=900)
+def _load_local_preds(path: str, time_col: str) -> pd.DataFrame | None:
+    try:
+        return pd.read_csv(path, parse_dates=[time_col], index_col=time_col)
+    except Exception:
+        return None
+
+local_preds = _load_local_preds(LOCAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLUMN)
 
 # Load global multi-step predictions (arrays of length 12 per timestamp)
-try:
-    global_preds = pd.read_csv(
-        GLOBAL_PREDICTIONS_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN], index_col=PREDICTIONS_TIME_COLUMN
-    )
-except Exception:
-    global_preds = None
+@st.cache_data(ttl=900)
+def _load_global_preds(path: str, time_col: str) -> pd.DataFrame | None:
+    try:
+        df = pd.read_csv(path, parse_dates=[time_col], index_col=time_col)
+        import ast
+        for col in [GLOBAL_TFT_PRED_COLUMN, GLOBAL_LSTM_PRED_COLUMN]:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('[') else x)
+        return df
+    except Exception:
+        return None
+
+global_preds = _load_global_preds(GLOBAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLUMN)
 
 # Calculate fixed y-axis bounds for consistent chart scaling
 y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
 
-# Show data overview
-with st.expander("📊 Data Overview", expanded=False):
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Records", len(vierlinden_data))
-    with col2:
-        st.metric(
-            "Date Range", f"{vierlinden_data.index.min().strftime('%Y-%m-%d')}"
-        )
-        st.caption(f"to {vierlinden_data.index.max().strftime('%Y-%m-%d')}")
-    with col3:
-        st.metric("Target Column", TARGET_COLUMN)
-    with col4:
-        st.metric("Y-Axis Range", f"[{y_axis_bounds[0]:.1f}, {y_axis_bounds[1]:.1f}]")
-        st.caption("Fixed bounds (±0.5 rounded)")
+# # Show data overview
+# with st.expander("📊 Data Overview", expanded=False):
+#     col1, col2, col3, col4 = st.columns(4)
+#     with col1:
+#         st.metric("Total Records", len(vierlinden_data))
+#     with col2:
+#         st.metric(
+#             "Date Range", f"{vierlinden_data.index.min().strftime('%Y-%m-%d')}"
+#         )
+#         st.caption(f"to {vierlinden_data.index.max().strftime('%Y-%m-%d')}")
+#     with col3:
+#         st.metric("Target Column", TARGET_COLUMN)
+#     with col4:
+#         st.metric("Y-Axis Range", f"[{y_axis_bounds[0]:.1f}, {y_axis_bounds[1]:.1f}]")
+#         st.caption("Fixed bounds (±0.5 rounded)")
 
 # Configuration options
 st.subheader("⚙️ Dashboard Configuration")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    show_chart = st.checkbox("Show Real-time Chart", value=True)
-with col2:
-    show_map = st.checkbox("Show Smooth Map", value=True)  
-with col3:
-    show_labels = st.checkbox("Show Location Labels", value=True)
 
 # Model scope selector
 model_scope = st.radio(
@@ -252,28 +253,27 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
         })
         
         # 4. Labels with better positioning
-        if show_labels:
-            # Determine label color based on activity
-            label_color = [255, 255, 255, 255] if activity_percentage > 0.5 else [0, 0, 0, 255]
-            label_bg_color = [0, 0, 0, 180] if activity_percentage > 0.5 else [255, 255, 255, 200]
-            
-            label_points.append({
-                'lon': lon,
-                'lat': lat - 0.0008,  # Position below marker
-                'text': location_name,
-                'size': 11,
-                'color': label_color,
-                'background_color': label_bg_color,
-                'active_sensors': active_sensors,
-                'inactive_sensors': total_sensors - active_sensors,
-                'total_sensors': total_sensors
-            })
+        # Determine label color based on activity
+        label_color = [255, 255, 255, 255] if activity_percentage > 0.5 else [0, 0, 0, 255]
+        label_bg_color = [0, 0, 0, 180] if activity_percentage > 0.5 else [255, 255, 255, 200]
+        
+        label_points.append({
+            'lon': lon,
+            'lat': lat - 0.0008,  # Position below marker
+            'text': location_name,
+            'size': 11,
+            'color': label_color,
+            'background_color': label_bg_color,
+            'active_sensors': active_sensors,
+            'inactive_sensors': total_sensors - active_sensors,
+            'total_sensors': total_sensors
+        })
     
     return (
         pd.DataFrame(marker_base_points), 
         pd.DataFrame(marker_ring_points),
         pd.DataFrame(marker_icons),
-        pd.DataFrame(label_points) if show_labels else None
+        pd.DataFrame(label_points)
     )
 
 def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Series, iteration: int):
@@ -314,211 +314,206 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
 
     # Left column: Interactive Map with Pydeck (smooth updates)
     with map_col:
-        if show_map:
-            st.markdown("**📍 Real-time Sensor Map**")
-            # Prepare enhanced map data with multiple layers
-            marker_base_data, marker_ring_data, marker_icon_data, label_data = prepare_map_data(data_row, timestamp, model_scope)
-            
-            # Create multiple layers for marker-like appearance
-            layers = []
-            
-            # 1. Outer ring layer (rendered first, behind everything)
-            ring_layer = pdk.Layer(
-                'ScatterplotLayer',
-                marker_ring_data,
+        st.markdown("**📍 Real-time Sensor Map**")
+        # Prepare enhanced map data with multiple layers
+        marker_base_data, marker_ring_data, marker_icon_data, label_data = prepare_map_data(data_row, timestamp, model_scope)
+        
+        # Create multiple layers for marker-like appearance
+        layers = []
+        
+        # 1. Outer ring layer (rendered first, behind everything)
+        ring_layer = pdk.Layer(
+            'ScatterplotLayer',
+            marker_ring_data,
+            get_position='[lon, lat]',
+            get_color='color',
+            get_radius='size',
+            pickable=False,
+            stroked=True,
+            stroke_width_min_pixels=1,
+            stroke_width_max_pixels=2,
+            get_line_color=[255, 255, 255, 160],
+            elevation_scale=1,
+            elevation_range=[0, 20],
+            get_elevation='elevation'
+        )
+        layers.append(ring_layer)
+        
+        # 2. Base marker layer (main colored circle)
+        marker_layer = pdk.Layer(
+            'ScatterplotLayer',
+            marker_base_data,
+            get_position='[lon, lat]',
+            get_color='color',
+            get_radius='size',
+            pickable=True,
+            auto_highlight=True,
+            stroked=True,
+            stroke_width_min_pixels=2,
+            stroke_width_max_pixels=3,
+            get_line_color=[255, 255, 255, 200],
+            elevation_scale=2,
+            elevation_range=[0, 30],
+            get_elevation='elevation'
+        )
+        layers.append(marker_layer)
+        
+        # 3. Icon center layer (white dot to simulate RSS icon)
+        icon_layer = pdk.Layer(
+            'ScatterplotLayer',
+            marker_icon_data,
+            get_position='[lon, lat]',
+            get_color='color',
+            get_radius='size',
+            pickable=False,
+            elevation_scale=3,
+            elevation_range=[0, 40],
+            get_elevation='elevation'
+        )
+        layers.append(icon_layer)
+        
+        # 4. Text labels with background effect
+        if label_data is not None and not label_data.empty:
+            # Background layer for labels (slightly larger, darker)
+            label_bg_layer = pdk.Layer(
+                'TextLayer',
+                label_data,
                 get_position='[lon, lat]',
-                get_color='color',
-                get_radius='size',
-                pickable=False,
-                stroked=True,
-                stroke_width_min_pixels=1,
-                stroke_width_max_pixels=2,
-                get_line_color=[255, 255, 255, 160],
-                elevation_scale=1,
-                elevation_range=[0, 20],
-                get_elevation='elevation'
+                get_text='text',
+                get_color='background_color',
+                get_size=13,  # Slightly larger for background effect
+                get_alignment_baseline="'middle'",
+                get_text_anchor="'middle'",
+                font_weight='bold'
             )
-            layers.append(ring_layer)
+            layers.append(label_bg_layer)
             
-            # 2. Base marker layer (main colored circle)
-            marker_layer = pdk.Layer(
-                'ScatterplotLayer',
-                marker_base_data,
+            # Foreground text layer
+            text_layer = pdk.Layer(
+                'TextLayer',
+                label_data,
                 get_position='[lon, lat]',
+                get_text='text',
                 get_color='color',
-                get_radius='size',
-                pickable=True,
-                auto_highlight=True,
-                stroked=True,
-                stroke_width_min_pixels=2,
-                stroke_width_max_pixels=3,
-                get_line_color=[255, 255, 255, 200],
-                elevation_scale=2,
-                elevation_range=[0, 30],
-                get_elevation='elevation'
+                get_size=11,
+                get_alignment_baseline="'middle'",
+                get_text_anchor="'middle'",
+                font_weight='bold'
             )
-            layers.append(marker_layer)
+            layers.append(text_layer)
             
-            # 3. Icon center layer (white dot to simulate RSS icon)
-            icon_layer = pdk.Layer(
-                'ScatterplotLayer',
-                marker_icon_data,
-                get_position='[lon, lat]',
-                get_color='color',
-                get_radius='size',
-                pickable=False,
-                elevation_scale=3,
-                elevation_range=[0, 40],
-                get_elevation='elevation'
-            )
-            layers.append(icon_layer)
-            
-            # 4. Text labels with background effect
-            if show_labels and label_data is not None and not label_data.empty:
-                # Background layer for labels (slightly larger, darker)
-                label_bg_layer = pdk.Layer(
-                    'TextLayer',
-                    label_data,
-                    get_position='[lon, lat]',
-                    get_text='text',
-                    get_color='background_color',
-                    get_size=13,  # Slightly larger for background effect
-                    get_alignment_baseline="'middle'",
-                    get_text_anchor="'middle'",
-                    font_weight='bold'
-                )
-                layers.append(label_bg_layer)
-                
-                # Foreground text layer
-                text_layer = pdk.Layer(
-                    'TextLayer',
-                    label_data,
-                    get_position='[lon, lat]',
-                    get_text='text',
-                    get_color='color',
-                    get_size=11,
-                    get_alignment_baseline="'middle'",
-                    get_text_anchor="'middle'",
-                    font_weight='bold'
-                )
-                layers.append(text_layer)
-            
-            # Create deck with stable view state (no flicker!)
-            view_state = pdk.ViewState(
-                latitude=center_lat,
-                longitude=center_lon,
-                zoom=13.25,
-                pitch=0,  # Slight 3D angle to show elevation
-                bearing=0
-            )
-            
-            deck = pdk.Deck(
-                layers=layers,
-                initial_view_state=view_state,
-                tooltip={
-                    'html': '''
-                        <div style="background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px;">
-                            <b>📍 {location}</b><br/>
-                            <span style="color: #4CAF50;">●</span> Active: {active_sensors}<br/>
-                            <span style="color: #FF5722;">●</span> Inactive: {inactive_sensors}
-                        </div>
-                    ''',
-                    'style': {
-                        'backgroundColor': 'transparent',
-                        'border': 'none'
-                    }
+        # Create deck with stable view state (no flicker!)
+        view_state = pdk.ViewState(
+            latitude=center_lat,
+            longitude=center_lon,
+            zoom=13.25,
+            pitch=0,  # Slight 3D angle to show elevation
+            bearing=0
+        )
+        
+        deck = pdk.Deck(
+            layers=layers,
+            initial_view_state=view_state,
+            tooltip={
+                'html': '''
+                    <div style="background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px;">
+                        <b>📍 {location}</b><br/>
+                        <span style="color: #4CAF50;">●</span> Active: {active_sensors}<br/>
+                        <span style="color: #FF5722;">●</span> Inactive: {inactive_sensors}
+                    </div>
+                ''',
+                'style': {
+                    'backgroundColor': 'transparent',
+                    'border': 'none'
                 }
-            )
+            }
+        )
+        
+        # This is the key - using a unique key based on iteration prevents flickering
+        st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
             
-            # This is the key - using a unique key based on iteration prevents flickering
-            st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
-        else:
-            st.info("Map display is disabled. Enable it in the configuration above.")
-
     # Middle column: Current Overview & Legend
     with overview_col:
         st.markdown("**📊 Current Overview**")
+        # Get the map data for overview calculations
+        if is_local_mode:
+            st.warning(
+                "Local mode is active. All locations are treated as inactive and sensor measurements are not considered.",
+                icon="⚠️",
+            )
+        marker_base_data, _, _, _ = prepare_map_data(data_row, timestamp, model_scope)
         
-        if show_map:
-            # Get the map data for overview calculations
+        # Calculate overview statistics
+        total_locations = len(marker_base_data)
+        active_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 100])
+        inactive_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 0])
+        
+        # Display as metrics
+        st.metric("📍 Total Locations", total_locations)
+        st.metric("🟢 Fully Active", active_locations)
+        st.metric("🔴 Inactive", inactive_locations)
+        
+        # Calculate overall network health
+        if total_locations > 0:
+            network_health = ((active_locations * 100)) / total_locations
+            st.markdown("---")
+            st.metric("🎯 Network Health", f"{network_health:.1f}%")
             if is_local_mode:
-                st.warning(
-                    "Local mode is active. All locations are treated as inactive and sensor measurements are not considered.",
-                    icon="⚠️",
-                )
-            marker_base_data, _, _, _ = prepare_map_data(data_row, timestamp, model_scope)
-            
-            # Calculate overview statistics
-            total_locations = len(marker_base_data)
-            active_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 100])
-            inactive_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 0])
-            
-            # Display as metrics
-            st.metric("📍 Total Locations", total_locations)
-            st.metric("🟢 Fully Active", active_locations)
-            st.metric("🔴 Inactive", inactive_locations)
-            
-            # Calculate overall network health
-            if total_locations > 0:
-                network_health = ((active_locations * 100)) / total_locations
-                st.markdown("---")
-                st.metric("🎯 Network Health", f"{network_health:.1f}%")
-                if is_local_mode:
-                    st.caption("Network health reflects forced inactivity in Local mode.")
-        else:
-            st.info("Enable map to see overview statistics")
+                st.caption("Network health reflects forced inactivity in Local mode.")
 
     # Right column: Simulation Chart  
     with chart_col:
-        if show_chart:
-            st.markdown("**📈 Simulation Chart**")
-            # Compute local one-step-ahead forecast value if in Local mode
-            forecast_value = None
-            forecast_series = None
-            if is_local_mode and local_preds is not None:
-                try:
-                    # Find t+1 timestamp based on main data index
-                    if idx + 1 < len(vierlinden_data.index):
-                        t_plus_one = vierlinden_data.index[idx + 1]
-                        if t_plus_one in local_preds.index:
-                            val = local_preds.loc[t_plus_one]
-                            # Use selected model column from config
-                            if local_model_choice == "LSTM" and LOCAL_LSTM_PRED_COLUMN in val.index and pd.notna(val[LOCAL_LSTM_PRED_COLUMN]):
-                                forecast_value = float(val[LOCAL_LSTM_PRED_COLUMN])
-                            elif local_model_choice == "Transformer" and LOCAL_TRANSFORMER_PRED_COLUMN in val.index and pd.notna(val[LOCAL_TRANSFORMER_PRED_COLUMN]):
-                                forecast_value = float(val[LOCAL_TRANSFORMER_PRED_COLUMN])
-                except Exception:
-                    forecast_value = None
-            # Compute 12-step forecast series if in Global mode
-            if is_global_mode and global_preds is not None:
-                try:
-                    # The row at t contains [t+1..t+12]
-                    t_key = vierlinden_data.index[idx]
-                    if t_key in global_preds.index:
-                        row = global_preds.loc[t_key]
-                        col = GLOBAL_TFT_PRED_COLUMN if global_model_choice == "TFT" else GLOBAL_LSTM_PRED_COLUMN
-                        if col in row.index and isinstance(row[col], str) and row[col].startswith("["):
-                            # Parse the array-like string safely
+        st.markdown("**📈 Simulation Chart**")
+        # Compute local one-step-ahead forecast value if in Local mode
+        forecast_value = None
+        forecast_series = None
+        if is_local_mode and local_preds is not None:
+            try:
+                # Find t+1 timestamp based on main data index
+                if idx + 1 < len(vierlinden_data.index):
+                    t_plus_one = vierlinden_data.index[idx + 1]
+                    if t_plus_one in local_preds.index:
+                        val = local_preds.loc[t_plus_one]
+                        # Use selected model column from config
+                        if local_model_choice == "LSTM" and LOCAL_LSTM_PRED_COLUMN in val.index and pd.notna(val[LOCAL_LSTM_PRED_COLUMN]):
+                            forecast_value = float(val[LOCAL_LSTM_PRED_COLUMN])
+                        elif local_model_choice == "Transformer" and LOCAL_TRANSFORMER_PRED_COLUMN in val.index and pd.notna(val[LOCAL_TRANSFORMER_PRED_COLUMN]):
+                            forecast_value = float(val[LOCAL_TRANSFORMER_PRED_COLUMN])
+            except Exception:
+                forecast_value = None
+        # Compute 12-step forecast series if in Global mode
+        if is_global_mode and global_preds is not None:
+            try:
+                # The row at t contains [t+1..t+12]
+                t_key = vierlinden_data.index[idx]
+                if t_key in global_preds.index:
+                    row = global_preds.loc[t_key]
+                    col = GLOBAL_TFT_PRED_COLUMN if global_model_choice == "TFT" else GLOBAL_LSTM_PRED_COLUMN
+                    if col in row.index:
+                        val = row[col]
+                        if isinstance(val, (list, tuple)):
+                            arr = val
+                        elif isinstance(val, str) and val.startswith("["):
                             import ast
-                            arr = ast.literal_eval(row[col])
-                            if isinstance(arr, (list, tuple)) and len(arr) >= 1:
-                                forecast_series = [float(x) for x in arr[:12]]
-                except Exception:
-                    forecast_series = None
-            simulation_chart.render(
-                data=vierlinden_data,
-                current_timestamp=timestamp,
-                current_value=current_value,
-                target_column=TARGET_COLUMN,
-                iteration=iteration,
-                show_checkbox=False,  # Disable internal checkbox to avoid conflicts
-                y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
-                height=550,
-                forecast_value=forecast_value,  # Local one-step ahead
-                forecast_series=forecast_series   # Global multi-step ahead [t+1..t+12]
-            )
-        else:
-            st.info("Chart display is disabled. Enable it in the configuration above.")
+                            arr = ast.literal_eval(val)
+                        else:
+                            arr = None
+                        if isinstance(arr, (list, tuple)) and len(arr) >= 1:
+                            forecast_series = [float(x) for x in list(arr)[:12]]
+            except Exception:
+                forecast_series = None
+        simulation_chart.render(
+            data=vierlinden_data,
+            current_timestamp=timestamp,
+            current_value=current_value,
+            target_column=TARGET_COLUMN,
+            iteration=iteration,
+            show_checkbox=False,  # Disable internal checkbox to avoid conflicts
+            y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
+            height=550,
+            forecast_value=forecast_value,  # Local one-step ahead
+            forecast_series=forecast_series   # Global multi-step ahead [t+1..t+12]
+        )
 
     # Full-width Rainfall Bar Chart
     st.markdown("---")

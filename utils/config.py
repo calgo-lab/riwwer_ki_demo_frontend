@@ -1,4 +1,5 @@
 import pandas as pd
+import streamlit as st
 import math
 
 # Coordinates (long, lat)
@@ -75,6 +76,7 @@ MAP_DATA = pd.DataFrame(
 DATA_PATH = "data/vierlinden_21_22_23_all_with_forecast.csv"
 
 
+@st.cache_data(ttl=900)
 def read_data():
     data = pd.read_csv(
         DATA_PATH,
