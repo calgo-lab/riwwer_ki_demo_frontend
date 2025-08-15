@@ -4,7 +4,20 @@ import pydeck as pdk
 import time
 import plotly.graph_objs as go
 import altair as alt
-from utils.config import read_data, TARGET_COLUMN, MAP_DATA, COORDINATES_DICT, SENSOR_GROUPS, calculate_target_column_bounds, RAINFALL_COLUMN, RAINFALL_FORECAST_COLUMN
+from utils.config import (
+    read_data,
+    TARGET_COLUMN,
+    MAP_DATA,
+    COORDINATES_DICT,
+    SENSOR_GROUPS,
+    calculate_target_column_bounds,
+    RAINFALL_COLUMN,
+    RAINFALL_FORECAST_COLUMN,
+    LOCAL_PREDICTIONS_PATH,
+    PREDICTIONS_TIME_COLUMN,
+    LOCAL_LSTM_PRED_COLUMN,
+    LOCAL_TRANSFORMER_PRED_COLUMN,
+)
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart, RainfallBarChart
 
@@ -20,6 +33,14 @@ st.write("High-performance real-time dashboard with smooth, non-flickering map u
 # Load data
 vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
 map_data = load_map_data() # Why not just use vierlinden_data directly?
+
+# Load local model predictions (one-step ahead)
+try:
+    local_preds = pd.read_csv(
+        LOCAL_PREDICTIONS_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN], index_col=PREDICTIONS_TIME_COLUMN
+    )
+except Exception:
+    local_preds = None
 
 # Calculate fixed y-axis bounds for consistent chart scaling
 y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
@@ -50,6 +71,29 @@ with col2:
     show_map = st.checkbox("Show Smooth Map", value=True)  
 with col3:
     show_labels = st.checkbox("Show Location Labels", value=True)
+
+# Model scope selector
+model_scope = st.radio(
+    "Model scope",
+    options=["Global", "Local"],
+    index=0,
+    horizontal=True,
+    key="model_scope_selector",
+    help="Global: normal operation. Local: mark all locations inactive and use local forecasts if available."
+)
+is_local_mode = (model_scope == "Local")
+
+# Local model selector (only visible in Local mode)
+local_model_choice = None
+if is_local_mode:
+    local_model_choice = st.radio(
+        "Local model",
+        options=["LSTM", "Transformer"],
+        index=0,
+        horizontal=True,
+        key="local_model_selector",
+        help="Choose which local model's predictions to visualize."
+    )
 
 # Initialize components using the smooth TimeSliderLive approach
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
@@ -97,7 +141,7 @@ def get_marker_color_and_size(sensor_statuses):
     else:
         return [255, 0, 0, 200]  # Red - all inactive
 
-def prepare_map_data(data_row, timestamp):
+def prepare_map_data(data_row, timestamp, model_scope: str):
     """Prepare enhanced marker data for Pydeck visualization"""
     # Build dynamic map data using current row
     dynamic_map_data = build_dynamic_map_data_from_row(map_data, data_row, timestamp)
@@ -113,6 +157,20 @@ def prepare_map_data(data_row, timestamp):
         lon = row["longitude"]
         location_name = row["info"]
         sensor_statuses = row["sensor_statuses"]
+
+        # In Local mode, force all sensors to inactive for each location
+        if model_scope == "Local":
+            sensor_list = SENSOR_GROUPS.get(location_name, [])
+            sensor_statuses = [
+                {
+                    "Sensor": s,
+                    "Status": "inactive",
+                    "Value": None,
+                    "LastValidDataTime": None,
+                    "TimeSinceLastValidData": None,
+                }
+                for s in sensor_list
+            ]
         
         # Get color based on sensor status (size is now consistent)
         color = get_marker_color_and_size(sensor_statuses)
@@ -237,9 +295,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     with map_col:
         if show_map:
             st.markdown("**📍 Real-time Sensor Map**")
-            
             # Prepare enhanced map data with multiple layers
-            marker_base_data, marker_ring_data, marker_icon_data, label_data = prepare_map_data(data_row, timestamp)
+            marker_base_data, marker_ring_data, marker_icon_data, label_data = prepare_map_data(data_row, timestamp, model_scope)
             
             # Create multiple layers for marker-like appearance
             layers = []
@@ -363,7 +420,12 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         
         if show_map:
             # Get the map data for overview calculations
-            marker_base_data, _, _, _ = prepare_map_data(data_row, timestamp)
+            if is_local_mode:
+                st.warning(
+                    "Local mode is active. All locations are treated as inactive and sensor measurements are not considered.",
+                    icon="⚠️",
+                )
+            marker_base_data, _, _, _ = prepare_map_data(data_row, timestamp, model_scope)
             
             # Calculate overview statistics
             total_locations = len(marker_base_data)
@@ -380,6 +442,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 network_health = ((active_locations * 100)) / total_locations
                 st.markdown("---")
                 st.metric("🎯 Network Health", f"{network_health:.1f}%")
+                if is_local_mode:
+                    st.caption("Network health reflects forced inactivity in Local mode.")
         else:
             st.info("Enable map to see overview statistics")
 
@@ -387,6 +451,22 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     with chart_col:
         if show_chart:
             st.markdown("**📈 Simulation Chart**")
+            # Compute local one-step-ahead forecast value if in Local mode
+            forecast_value = None
+            if is_local_mode and local_preds is not None:
+                try:
+                    # Find t+1 timestamp based on main data index
+                    if idx + 1 < len(vierlinden_data.index):
+                        t_plus_one = vierlinden_data.index[idx + 1]
+                        if t_plus_one in local_preds.index:
+                            val = local_preds.loc[t_plus_one]
+                            # Use selected model column from config
+                            if local_model_choice == "LSTM" and LOCAL_LSTM_PRED_COLUMN in val.index and pd.notna(val[LOCAL_LSTM_PRED_COLUMN]):
+                                forecast_value = float(val[LOCAL_LSTM_PRED_COLUMN])
+                            elif local_model_choice == "Transformer" and LOCAL_TRANSFORMER_PRED_COLUMN in val.index and pd.notna(val[LOCAL_TRANSFORMER_PRED_COLUMN]):
+                                forecast_value = float(val[LOCAL_TRANSFORMER_PRED_COLUMN])
+                except Exception:
+                    forecast_value = None
             simulation_chart.render(
                 data=vierlinden_data,
                 current_timestamp=timestamp,
@@ -395,7 +475,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 iteration=iteration,
                 show_checkbox=False,  # Disable internal checkbox to avoid conflicts
                 y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
-                height=550
+                height=550,
+                forecast_value=forecast_value  # Constant forecast replicated across future window
             )
         else:
             st.info("Chart display is disabled. Enable it in the configuration above.")

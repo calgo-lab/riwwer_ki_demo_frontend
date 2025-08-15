@@ -131,3 +131,9 @@ TARGET_COLUMN = "PV_18_Fuellstand_RUEB_1_ival"
 RAINFALL_COLUMN = "Niederschlag_mm"
 
 RAINFALL_FORECAST_COLUMN = "Niederschlag_Vorhersage_mm"
+
+# Local predictions configuration
+LOCAL_PREDICTIONS_PATH = "data/demo_local_predictions.csv"
+PREDICTIONS_TIME_COLUMN = "Datetime"
+LOCAL_LSTM_PRED_COLUMN = "LSTM Predictions"
+LOCAL_TRANSFORMER_PRED_COLUMN = "Transformer Predictions"

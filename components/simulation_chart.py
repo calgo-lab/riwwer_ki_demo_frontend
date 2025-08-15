@@ -174,7 +174,8 @@ class SimulationChart:
                show_checkbox: bool = True,
                checkbox_label: str = "Show simulation view (72h window)",
                iteration: Optional[int] = None,
-               y_axis_bounds: Optional[tuple[float, float]] = None) -> None:
+               y_axis_bounds: Optional[tuple[float, float]] = None,
+               forecast_value: Optional[float] = None) -> None:
         """
         Render the simulation chart component.
         
@@ -212,7 +213,8 @@ class SimulationChart:
                 title=title,
                 height=height,
                 iteration=iteration,
-                y_axis_bounds=y_axis_bounds
+                y_axis_bounds=y_axis_bounds,
+                forecast_value=forecast_value
             )
         except ImportError:
             st.warning("Altair not available. Install altair for enhanced visualization: `pip install altair`")
@@ -226,7 +228,8 @@ class SimulationChart:
                             title: Optional[str] = None,
                             height: int = 600,
                             iteration: Optional[int] = None,
-                            y_axis_bounds: Optional[tuple[float, float]] = None) -> None:
+                            y_axis_bounds: Optional[tuple[float, float]] = None,
+                            forecast_value: Optional[float] = None) -> None:
         """Create the main altair chart with all visual elements."""
         
         # Calculate the 72-hour window ending at current time
@@ -320,7 +323,7 @@ class SimulationChart:
                 )
                 chart_elements.append(background_rect)
         
-        # 2. Historical data line - OPTIMIZED to prevent disappearing
+    # 2. Historical data line - OPTIMIZED to prevent disappearing
         if has_valid_data and not historical_data.empty:
             # OPTIMIZATION: Prepare data more efficiently
             hist_df = historical_data.reset_index()
@@ -355,7 +358,7 @@ class SimulationChart:
                     )
                     chart_elements.append(historical_line)
 
-        # 2b. Ground truth future line (if available) — lighter blue, only within future window
+    # 2b. Ground truth future line (if available) — lighter blue, only within future window
         try:
             future_mask = (data.index > current_ts) & (data.index <= window_end)
             future_df = data.loc[future_mask, [target_column]].dropna().reset_index()
@@ -380,6 +383,30 @@ class SimulationChart:
         except Exception:
             # Be resilient: if anything goes wrong, just skip future line
             pass
+
+        # 2c. Model forecast (constant across future window) — orange
+        if forecast_value is not None:
+            try:
+                forecast_df = pd.DataFrame({
+                    'datetime': [current_ts, window_end],
+                    target_column: [forecast_value, forecast_value]
+                })
+                forecast_line = alt.Chart(forecast_df).mark_line(
+                    color='#ff7f0e',
+                    strokeWidth=2.5,
+                    interpolate='linear',
+                    strokeCap='round'
+                ).encode(
+                    x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                    y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                    tooltip=[
+                        alt.Tooltip('datetime:T', title='Time'),
+                        alt.Tooltip(f'{target_column}:Q', title='Model forecast', format='.2f')
+                    ]
+                )
+                chart_elements.append(forecast_line)
+            except Exception:
+                pass
         
         # 3. Current time vertical line
         current_line_data = pd.DataFrame({
@@ -501,7 +528,8 @@ class SimulationChart:
                      title: Optional[str] = None,
                      height: int = 500,
                      iteration: Optional[int] = None,
-                     y_axis_bounds: Optional[tuple[float, float]] = None) -> None:
+                     y_axis_bounds: Optional[tuple[float, float]] = None,
+                     forecast_value: Optional[float] = None) -> None:
         """Create the main plotly chart."""
         fig = go.Figure()
         
@@ -557,6 +585,16 @@ class SimulationChart:
                 ))
         except Exception:
             pass
+
+        # Add model forecast (constant across future window) if provided
+        if forecast_value is not None:
+            fig.add_trace(go.Scatter(
+                x=[current_ts, window_end],
+                y=[forecast_value, forecast_value],
+                mode='lines',
+                name='Model forecast',
+                line=dict(color='rgb(255, 127, 14)', width=3)
+            ))
         
         # Calculate actual hours of historical data available
         if not historical_data.empty:
