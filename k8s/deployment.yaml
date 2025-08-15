@@ -1,0 +1,86 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: riwwer-ki-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: riwwer-ki-demo
+  template:
+    metadata:
+      labels:
+        app: riwwer-ki-demo
+    spec:
+      containers:
+      - name: riwwer-ki-demo
+        image: registry.datexis.com/calgo-lab/riwwer-ki-demo:latest
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 8501
+        resources:
+          requests:
+            cpu: "5"
+          limits:
+            # TODO: Find out resource limits for this container
+        volumeMounts:
+          - name: riwwer-ki-demo-pvc
+            mountPath: /storage
+      imagePullSecrets:
+      - name: private-registry-auth
+      volumes:
+        - name: riwwer-ki-demo-pvc
+          persistentVolumeClaim:
+            claimName: riwwer-ki-demo-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: riwwer-ki-demo-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: riwwer-ki-demo-service
+spec:
+  selector:
+    app: riwwer-ki-demo
+  ports:
+    - protocol: TCP
+      port: 80 # Exposed to Ingress
+      targetPort: 8501 # Matches container port
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: riwwer-ki-demo-service
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-body-size: "15m"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "riwwer.demo.calgo-lab.de"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: riwwer-ki-demo-service
+            port:
+              number: 80 # Matches service port
+  tls:
+  - hosts:
+    - "riwwer.demo.calgo-lab.de"
+    secretName: "riwwer-ki-demo-subdomain-ingress"

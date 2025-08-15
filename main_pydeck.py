@@ -31,7 +31,6 @@ st.set_page_config(
 )
 
 st.title("RIWWER KI Demo")
-st.write("High-performance real-time dashboard with smooth, non-flickering map updates using Pydeck")
 
 # Load data
 vierlinden_data = read_data()[read_data().index >= "2023-01-01"]

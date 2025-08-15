@@ -1,0 +1,24 @@
+# Ignore virtual environments, Git, and local caches
+.venv/
+__pycache__/
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.log
+*.ipynb_checkpoints/
+
+# Large local data not needed in image (adjust if required by app)
+# Keep data/ since the app reads CSVs at runtime
+wandb/
+
+# Bytecode and build artifacts
+build/
+dist/
+.eggs/
+*.egg-info/
