@@ -297,6 +297,15 @@ class TimeSliderLive:
         # Create placeholder for the main content
         placeholder = st.empty()
 
+        # Hard wipe when switching modes (paused <-> playing) to avoid stacked/dimmed components
+        mode_key = f"{self.session_key}_last_mode"
+        current_mode = "playing" if self._is_playing() else "paused"
+        if st.session_state.get(mode_key) != current_mode:
+            placeholder.empty()
+            st.session_state[mode_key] = current_mode
+            st.rerun()
+            return
+
         # Calculate sleep time between updates
         sleep_time = 1.0 / updates_per_second
 
@@ -337,7 +346,7 @@ class TimeSliderLive:
                     st.session_state[rain_suppress_key] = True
                     st.session_state[rain_slider_ver_key] = st.session_state.get(rain_slider_ver_key, 0) + 1
 
-                if show_progress: 
+                if show_progress:
                     col_s, col_t = st.columns([4, 2])
                     with col_s:
                         # Slider is 1-based for UX, mapped to 0-based internally
@@ -353,9 +362,7 @@ class TimeSliderLive:
                         # Convert slider value (1-based) to index (0-based) for timestamp lookup
                         sel_idx0 = max(self.min_index, min(self.max_index, int(slider_val) - 1))
                         ts_for_slider = self.timestamps[sel_idx0]
-                        st.write(
-                            f"**Selected:** {ts_for_slider.strftime('%Y-%m-%d %H:%M:%S')}"
-                        )
+                        st.write(f"**Selected:** {ts_for_slider.strftime('%Y-%m-%d %H:%M:%S')}")
                     # Immediately apply slider selection to current index so render reflects it now
                     if sel_idx0 != baseline_idx:
                         # Bump rainfall slider version so it will reset to new rainfall on rerun
@@ -364,6 +371,7 @@ class TimeSliderLive:
                         self._set_current_index(sel_idx0)
                         # Force a rerun to re-instantiate widgets with up-to-date defaults
                         st.rerun()
+
                 # Optional rainfall event selector (only when paused)
                 # Placed directly under the time step slider
                 rain_col_name = None
@@ -455,9 +463,7 @@ class TimeSliderLive:
                     with col1:
                         st.write(f"**Index:** {current_idx + 1} / {len(self.data)}")
                     with col2:
-                        st.write(
-                            f"**Time:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
-                        )
+                        st.write(f"**Time:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
                     with col3:
                         st.write(f"**Status:** ⏸️ Paused ({effective_speed}x)")
 
@@ -479,9 +485,7 @@ class TimeSliderLive:
                     with col1:
                         st.write(f"**Index:** {current_idx + 1} / {len(self.data)}")
                     with col2:
-                        st.write(
-                            f"**Time:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
-                        )
+                        st.write(f"**Time:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
                     with col3:
                         st.write(f"**Status:** ▶️ Playing ({effective_speed}x)")
 
@@ -489,9 +493,7 @@ class TimeSliderLive:
                     st.progress(progress)
 
                 try:
-                    content_renderer(
-                        current_idx, current_timestamp, current_data, iteration
-                    )
+                    content_renderer(current_idx, current_timestamp, current_data, iteration)
                 except Exception as e:
                     st.error(f"Error in content renderer: {e}")
 
@@ -500,9 +502,7 @@ class TimeSliderLive:
                     if st.session_state.get(f"{self.session_key}_skip_autoadvance"):
                         st.session_state[f"{self.session_key}_skip_autoadvance"] = False
                     else:
-                        steps_to_advance = self._calculate_time_step(
-                            effective_speed, updates_per_second
-                        )
+                        steps_to_advance = self._calculate_time_step(effective_speed, updates_per_second)
                         if steps_to_advance > 0:
                             self._step_forward(steps_to_advance)
                 else:
