@@ -511,7 +511,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
             height=550,
             forecast_value=forecast_value,  # Local one-step ahead
-            forecast_series=forecast_series   # Global multi-step ahead [t+1..t+12]
+            forecast_series=forecast_series,   # Global multi-step ahead [t+1..t+12]
+            is_local_mode=is_local_mode
         )
 
     # Full-width Rainfall Bar Chart

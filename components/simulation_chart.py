@@ -175,6 +175,7 @@ class SimulationChart:
                checkbox_label: str = "Show simulation view (72h window)",
                iteration: Optional[int] = None,
                y_axis_bounds: Optional[tuple[float, float]] = None,
+               is_local_mode: Optional[bool] = None,
                forecast_value: Optional[float] = None,
                forecast_series: Optional[list[float]] = None) -> None:
         """
@@ -215,35 +216,49 @@ class SimulationChart:
                 height=height,
                 iteration=iteration,
                 y_axis_bounds=y_axis_bounds,
+                is_local_mode_hint=is_local_mode,
                 forecast_value=forecast_value,
                 forecast_series=forecast_series
             )
         except ImportError:
             st.warning("Altair not available. Install altair for enhanced visualization: `pip install altair`")
             self._create_fallback_chart(data, target_column, height)
-    
+
     def _create_altair_chart(self,
-                            data: pd.DataFrame,
-                            current_timestamp: pd.Timestamp,
-                            current_value: float,
-                            target_column: str,
-                            title: Optional[str] = None,
-                            height: int = 600,
-                            iteration: Optional[int] = None,
-                            y_axis_bounds: Optional[tuple[float, float]] = None,
-                            forecast_value: Optional[float] = None,
-                            forecast_series: Optional[list[float]] = None) -> None:
+                             data: pd.DataFrame,
+                             current_timestamp: pd.Timestamp,
+                             current_value: float,
+                             target_column: str,
+                             title: Optional[str] = None,
+                             height: int = 600,
+                             iteration: Optional[int] = None,
+                             y_axis_bounds: Optional[tuple[float, float]] = None,
+                             is_local_mode_hint: Optional[bool] = None,
+                             forecast_value: Optional[float] = None,
+                             forecast_series: Optional[list[float]] = None) -> None:
         """Create the main altair chart with all visual elements."""
-        
-        # Calculate the 72-hour window ending at current time
+
+        # Decide mode based on provided forecasts or explicit hint
+        if is_local_mode_hint is not None:
+            is_local_mode = bool(is_local_mode_hint)
+            is_global_mode = not is_local_mode
+        else:
+            is_global_mode = forecast_series is not None and len(forecast_series) > 0
+            is_local_mode = (not is_global_mode) and (forecast_value is not None)
+
+        # History window depends on mode: 72h for global, 24h for local (input sequence length)
+        history_window_hours = 24 if is_local_mode else 72
+
+        # Calculate the window ending at current time
         current_ts = pd.Timestamp(current_timestamp)
-        window_start = current_ts - pd.Timedelta(hours=72)
-        window_end = current_ts + pd.Timedelta(hours=12)  # 12h margin on the right
-        
+        window_start = current_ts - pd.Timedelta(hours=history_window_hours)
+        # Visual future window: 12h for global (to show all 12 steps), 2h for local (just spacing)
+        window_end = current_ts + (pd.Timedelta(hours=12) if is_global_mode else pd.Timedelta(hours=2))
+
         # Handle edge case: if we're at the beginning of the dataset
         data_start = data.index.min()
         actual_window_start = max(window_start, data_start)
-        
+
         # OPTIMIZED: Use cached data preparation
         historical_data, has_valid_data = self._prepare_optimized_data(
             data=data,
@@ -252,24 +267,13 @@ class SimulationChart:
             window_start=window_start,
             actual_window_start=actual_window_start
         )
-        
-        # OPTIMIZED: Use cached title generation
-        title_cache_key = f"{target_column}_{has_valid_data}"
-        if title_cache_key in self._title_cache:
-            hours_text = self._title_cache[title_cache_key]
-        else:
-            # Calculate actual hours of historical data available
-            if has_valid_data and not historical_data.empty:
-                actual_hours = (current_ts - historical_data.index.min()).total_seconds() / 3600
-                hours_text = f"({actual_hours:.0f}h History" if actual_hours < 72 else "(72h History"
-            else:
-                hours_text = "(No History"
-            self._title_cache[title_cache_key] = hours_text
-        
-        # Generate title
+
+        # Title should reflect fixed horizons: 72+12 for global, 24+1 for local (forecast horizon),
+        # regardless of visual future margin (2h)
+        future_steps = 12 if is_global_mode else 1
         if title is None:
-            title = f"{target_column} - Simulation View {hours_text} + 12h Future Window)"
-        
+            title = f"{target_column} - Simulation View ({history_window_hours}h History + {future_steps}h Forecast)"
+
         # OPTIMIZED: Use cached bounds calculation
         y_min, y_max, y_padding = self._get_cached_bounds(
             data=data,
@@ -278,15 +282,49 @@ class SimulationChart:
             target_column=target_column,
             y_axis_bounds=y_axis_bounds
         )
-        
+
+        # In local mode, ensure y-domain also covers the t+1 points (forecast and GT) when dynamic bounds are used
+        if y_axis_bounds is None and is_local_mode:
+            # Determine t+1 timestamp (next index in data after current_ts)
+            t_plus_one = None
+            try:
+                # Use searchsorted to find next timestamp strictly greater than current_ts
+                pos = data.index.searchsorted(current_ts, side='right')
+                if pos < len(data.index):
+                    t_plus_one = data.index[pos]
+            except Exception:
+                t_plus_one = None
+
+            extra_vals = []
+            if t_plus_one is not None:
+                # Ground truth value at t+1 if available
+                try:
+                    if target_column in data.columns and t_plus_one in data.index:
+                        gt_val = data.loc[t_plus_one, target_column]
+                        if pd.notna(gt_val):
+                            extra_vals.append(float(gt_val))
+                except Exception:
+                    pass
+            if forecast_value is not None:
+                try:
+                    extra_vals.append(float(forecast_value))
+                except Exception:
+                    pass
+
+            if extra_vals:
+                y_min = min(y_min, min(extra_vals))
+                y_max = max(y_max, max(extra_vals))
+                rng = (y_max - y_min)
+                y_padding = (rng * 0.1) if rng != 0 else 0.1
+
         y_domain = [y_min, y_max]
-        
+
         # OPTIMIZED: Create a unified data structure for all chart elements
         chart_elements = []
-        
+
         # 1. Background rectangles for different time zones
         rect_data = []
-        
+
         # Missing historical data rectangle (if applicable)
         if actual_window_start > window_start:
             missing_hours = (actual_window_start - window_start).total_seconds() / 3600
@@ -298,20 +336,20 @@ class SimulationChart:
                 'type': 'missing',
                 'label': f'No Data Available ({missing_hours:.0f}h missing)'
             })
-        
-        # Future window rectangle
+
+        # Future window rectangle (visual margin: 12h global, 2h local)
         rect_data.append({
             'x': current_ts,
             'x2': window_end,
             'y': y_domain[0],
             'y2': y_domain[1],
             'type': 'future',
-            'label': 'Future Window'
+            'label': f"Future Window ({'12h' if is_global_mode else '2h'})"
         })
-        
+
         if rect_data:
             rect_df = pd.DataFrame(rect_data)
-            
+
             # Background rectangles as separate charts
             for _, rect_row in rect_df.iterrows():
                 background_rect = alt.Chart(pd.DataFrame([rect_row])).mark_rect(
@@ -325,35 +363,21 @@ class SimulationChart:
                     tooltip=['label:N']
                 )
                 chart_elements.append(background_rect)
-        
-    # 2. Historical data line - OPTIMIZED to prevent disappearing
+
+        # 2. Historical data line
         if has_valid_data and not historical_data.empty:
-            # OPTIMIZATION: Prepare data more efficiently
             hist_df = historical_data.reset_index()
-            # Standardize column names efficiently
             if hist_df.columns[0] != 'datetime':
                 hist_df = hist_df.rename(columns={hist_df.columns[0]: 'datetime'})
-            
-            # Ensure we have valid data and the target column
+
             if target_column in hist_df.columns:
-                # OPTIMIZATION: More robust NaN handling
-                valid_data_mask = hist_df[target_column].notna()
-                hist_df_clean = hist_df[valid_data_mask]
-                
-                if not hist_df_clean.empty and len(hist_df_clean) > 0:
-                    # OPTIMIZATION: Use more robust chart creation
+                hist_df_clean = hist_df[hist_df[target_column].notna()]
+                if not hist_df_clean.empty:
                     historical_line = alt.Chart(hist_df_clean).mark_line(
-                        color='#1f77b4',  # Use specific color to prevent theming issues
-                        strokeWidth=2.5,  # Slightly thicker for better visibility
-                        interpolate='linear',  # Explicit interpolation
-                        strokeCap='round'  # Smoother line endings
+                        color='#1f77b4', strokeWidth=2.5, interpolate='linear', strokeCap='round'
                     ).encode(
-                        x=alt.X('datetime:T', 
-                               scale=alt.Scale(domain=[window_start, window_end]),
-                               title='Time'),
-                        y=alt.Y(f'{target_column}:Q', 
-                               scale=alt.Scale(domain=y_domain),
-                               title=target_column),
+                        x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                        y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
                         tooltip=[
                             alt.Tooltip('datetime:T', title='Time'),
                             alt.Tooltip(f'{target_column}:Q', title=target_column, format='.2f')
@@ -361,196 +385,151 @@ class SimulationChart:
                     )
                     chart_elements.append(historical_line)
 
-    # 2b. Ground truth future line (if available) — lighter blue, only within future window
+        # 2b. Ground truth future — line for global, single point for local
         try:
-            future_mask = (data.index > current_ts) & (data.index <= window_end)
-            future_df = data.loc[future_mask, [target_column]].dropna().reset_index()
-            if not future_df.empty:
-                if future_df.columns[0] != 'datetime':
-                    future_df = future_df.rename(columns={future_df.columns[0]: 'datetime'})
+            if is_global_mode:
+                future_mask = (data.index > current_ts) & (data.index <= window_end)
+                future_df = data.loc[future_mask, [target_column]].dropna().reset_index()
+                if not future_df.empty:
+                    if future_df.columns[0] != 'datetime':
+                        future_df = future_df.rename(columns={future_df.columns[0]: 'datetime'})
+                    future_line = alt.Chart(future_df).mark_line(
+                        color='#9ecae1', strokeWidth=2, interpolate='linear', strokeCap='round'
+                    ).encode(
+                        x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                        y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                        tooltip=[
+                            alt.Tooltip('datetime:T', title='Time'),
+                            alt.Tooltip(f'{target_column}:Q', title=f'{target_column} (Future GT)', format='.2f')
+                        ]
+                    )
+                    chart_elements.append(future_line)
+            elif is_local_mode:
+                # Plot only t+1 ground truth as a point
+                t_plus_one = None
+                try:
+                    pos = data.index.searchsorted(current_ts, side='right')
+                    if pos < len(data.index):
+                        t_plus_one = data.index[pos]
+                except Exception:
+                    t_plus_one = None
 
-                future_line = alt.Chart(future_df).mark_line(
-                    color='#9ecae1',  # lighter blue
-                    strokeWidth=2,
-                    interpolate='linear',
-                    strokeCap='round'
-                ).encode(
-                    x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
-                    y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
-                    tooltip=[
-                        alt.Tooltip('datetime:T', title='Time'),
-                        alt.Tooltip(f'{target_column}:Q', title=f'{target_column} (Future GT)', format='.2f')
-                    ]
-                )
-                chart_elements.append(future_line)
+                if t_plus_one is not None and t_plus_one in data.index:
+                    gt_val = data.loc[t_plus_one, target_column]
+                    if pd.notna(gt_val):
+                        gt_point_df = pd.DataFrame({'datetime': [t_plus_one], target_column: [float(gt_val)]})
+                        gt_point = alt.Chart(gt_point_df).mark_point(color='#9ecae1', size=80).encode(
+                            x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                            y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                            tooltip=[
+                                alt.Tooltip('datetime:T', title='t+1'),
+                                alt.Tooltip(f'{target_column}:Q', title='Ground truth (t+1)', format='.2f')
+                            ]
+                        )
+                        chart_elements.append(gt_point)
         except Exception:
-            # Be resilient: if anything goes wrong, just skip future line
             pass
 
-        # 2c. Model forecast (constant across future window) — orange
+        # 2c. Model forecast — constant line for global, single point at t+1 for local
         if forecast_value is not None:
             try:
-                forecast_df = pd.DataFrame({
-                    'datetime': [current_ts, window_end],
-                    target_column: [forecast_value, forecast_value]
-                })
-                forecast_line = alt.Chart(forecast_df).mark_line(
-                    color='#ff7f0e',
-                    strokeWidth=2.5,
-                    interpolate='linear',
-                    strokeCap='round'
-                ).encode(
-                    x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
-                    y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
-                    tooltip=[
-                        alt.Tooltip('datetime:T', title='Time'),
-                        alt.Tooltip(f'{target_column}:Q', title='Model forecast', format='.2f')
-                    ]
-                )
-                chart_elements.append(forecast_line)
+                if is_global_mode:
+                    forecast_df = pd.DataFrame({'datetime': [current_ts, window_end], target_column: [forecast_value, forecast_value]})
+                    forecast_line = alt.Chart(forecast_df).mark_line(color='#ff7f0e', strokeWidth=2.5, interpolate='linear', strokeCap='round').encode(
+                        x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                        y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                        tooltip=[alt.Tooltip('datetime:T', title='Time'), alt.Tooltip(f'{target_column}:Q', title='Model forecast', format='.2f')]
+                    )
+                    chart_elements.append(forecast_line)
+                elif is_local_mode:
+                    t_plus_one = None
+                    try:
+                        pos = data.index.searchsorted(current_ts, side='right')
+                        if pos < len(data.index):
+                            t_plus_one = data.index[pos]
+                    except Exception:
+                        t_plus_one = None
+                    if t_plus_one is not None:
+                        forecast_point_df = pd.DataFrame({'datetime': [t_plus_one], target_column: [float(forecast_value)]})
+                        forecast_point = alt.Chart(forecast_point_df).mark_point(color='#ff7f0e', size=80).encode(
+                            x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
+                            y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
+                            tooltip=[alt.Tooltip('datetime:T', title='t+1'), alt.Tooltip(f'{target_column}:Q', title='Forecast (t+1)', format='.2f')]
+                        )
+                        chart_elements.append(forecast_point)
             except Exception:
                 pass
 
         # 2d. Global multi-step forecast series (t+1..t+12) — orange with markers
-        if forecast_series is not None and len(forecast_series) > 0:
+        if is_global_mode and forecast_series is not None and len(forecast_series) > 0:
             try:
-                # Build timestamps t+1.. aligned at the data's frequency (assumed hourly)
                 steps = min(12, len(forecast_series))
                 times = [current_ts + pd.Timedelta(hours=i) for i in range(1, steps + 1)]
-                series_df = pd.DataFrame({
-                    'datetime': times,
-                    target_column: forecast_series[:steps]
-                })
-                series_line = alt.Chart(series_df).mark_line(
-                    color='#ff7f0e',
-                    strokeWidth=2.5,
-                ).encode(
+                series_df = pd.DataFrame({'datetime': times, target_column: forecast_series[:steps]})
+                series_line = alt.Chart(series_df).mark_line(color='#ff7f0e', strokeWidth=2.5).encode(
                     x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
                     y=alt.Y(f'{target_column}:Q', scale=alt.Scale(domain=y_domain), title=target_column),
-                    tooltip=[
-                        alt.Tooltip('datetime:T', title='Time'),
-                        alt.Tooltip(f'{target_column}:Q', title='Global forecast', format='.2f')
-                    ]
+                    tooltip=[alt.Tooltip('datetime:T', title='Time'), alt.Tooltip(f'{target_column}:Q', title='Global forecast', format='.2f')]
                 )
-                series_pts = alt.Chart(series_df).mark_point(
-                    color='#ff7f0e', size=50
-                ).encode(
+                series_pts = alt.Chart(series_df).mark_point(color='#ff7f0e', size=50).encode(
                     x='datetime:T', y=f'{target_column}:Q'
                 )
                 chart_elements.append(series_line + series_pts)
             except Exception:
                 pass
-        
+
         # 3. Current time vertical line
-        current_line_data = pd.DataFrame({
-            'x': [current_ts, current_ts],
-            'y': y_domain
-        })
-        
-        current_line = alt.Chart(current_line_data).mark_line(
-            color='red',
-            strokeWidth=2,
-            strokeDash=[5, 5],
-            opacity=0.7
-        ).encode(
+        current_line_data = pd.DataFrame({'x': [current_ts, current_ts], 'y': y_domain})
+        current_line = alt.Chart(current_line_data).mark_line(color='red', strokeWidth=2, strokeDash=[5, 5], opacity=0.7).encode(
             x=alt.X('x:T', scale=alt.Scale(domain=[window_start, window_end])),
             y=alt.Y('y:Q', scale=alt.Scale(domain=y_domain))
         )
         chart_elements.append(current_line)
-        
+
         # 4. Current time point
-        current_point_data = pd.DataFrame({
-            'datetime': [current_ts],
-            'value': [current_value],
-            'label': ['Current Time']
-        })
-        
-        current_point = alt.Chart(current_point_data).mark_circle(
-            color='red',
-            size=150,
-            stroke='darkred',
-            strokeWidth=2
-        ).encode(
+        current_point_data = pd.DataFrame({'datetime': [current_ts], 'value': [current_value], 'label': ['Current Time']})
+        current_point = alt.Chart(current_point_data).mark_circle(color='red', size=150, stroke='darkred', strokeWidth=2).encode(
             x=alt.X('datetime:T', scale=alt.Scale(domain=[window_start, window_end])),
             y=alt.Y('value:Q', scale=alt.Scale(domain=y_domain)),
-            tooltip=[
-                alt.Tooltip('datetime:T', title='Current Time'),
-                alt.Tooltip('value:Q', title='Current Value', format='.2f')
-            ]
+            tooltip=[alt.Tooltip('datetime:T', title='Current Time'), alt.Tooltip('value:Q', title='Current Value', format='.2f')]
         )
         chart_elements.append(current_point)
-        
+
         # 5. "NOW" text annotation
-        now_text_data = pd.DataFrame({
-            'x': [current_ts],
-            'y': [y_domain[1] - y_padding * 0.2],
-            'text': ['NOW']
-        })
-        
-        now_text = alt.Chart(now_text_data).mark_text(
-            align='center',
-            baseline='middle',
-            dx=0,
-            dy=-10,
-            fontSize=12,
-            fontWeight='bold',
-            color='red'
-        ).encode(
+        now_text_data = pd.DataFrame({'x': [current_ts], 'y': [y_domain[1] - y_padding * 0.2], 'text': ['NOW']})
+        now_text = alt.Chart(now_text_data).mark_text(align='center', baseline='middle', dx=0, dy=-10, fontSize=12, fontWeight='bold', color='red').encode(
             x=alt.X('x:T', scale=alt.Scale(domain=[window_start, window_end])),
             y=alt.Y('y:Q', scale=alt.Scale(domain=y_domain)),
             text='text:N'
         )
         chart_elements.append(now_text)
-        
+
         # Combine all chart elements
         if len(chart_elements) > 0:
-            # Create the layered chart with proper error handling
             try:
-                combined_chart = alt.layer(*chart_elements)
-                
-                # Apply properties to the combined chart
-                combined_chart = combined_chart.resolve_scale(
-                    x='shared',
-                    y='shared'
-                ).properties(
-                    width='container',
-                    height=height,
-                    title={
-                        "text": title,
-                        "fontSize": 14,
-                        "anchor": "start"
-                    }
+                combined_chart = alt.layer(*chart_elements).resolve_scale(x='shared', y='shared').properties(
+                    width='container', height=height, title={"text": title, "fontSize": 14, "anchor": "start"}
                 )
             except Exception as e:
-                # Fallback if layering fails
                 st.error(f"Chart layering failed: {e}")
                 combined_chart = None
         else:
-            # Fallback: create a simple empty chart when no chart elements
             empty_data = pd.DataFrame({'x': [window_start, window_end], 'y': y_domain})
             combined_chart = alt.Chart(empty_data).mark_point(opacity=0).encode(
                 x=alt.X('x:T', scale=alt.Scale(domain=[window_start, window_end]), title='Time'),
                 y=alt.Y('y:Q', scale=alt.Scale(domain=y_domain), title=target_column)
-            ).properties(
-                width='container',
-                height=height,
-                title=f'{target_column} - No Data'
-            )
-        
-        # OPTIMIZED: Create unique but stable key for Streamlit to prevent flickering
+            ).properties(width='container', height=height, title=f'{target_column} - No Data')
+
+        # Stable chart key
         if self.interactive and iteration is not None:
-            # Use modulo to limit key variations and prevent memory issues
-            stable_iteration = iteration % 100  # Cycle keys every 100 iterations
+            stable_iteration = iteration % 100
             chart_key = f"{self.key}_altair_stable_{stable_iteration}"
         else:
             chart_key = f"{self.key}_altair_static"
-        
-        # PERFORMANCE: Only render if we have a valid chart
+
         if combined_chart is not None:
-            # Render the chart
             st.altair_chart(combined_chart, use_container_width=True, key=chart_key)
         else:
-            # Show informative message if no chart could be created
             st.warning(f"Unable to render chart for {target_column}. Chart creation failed.")
     
     def _create_chart(self,
