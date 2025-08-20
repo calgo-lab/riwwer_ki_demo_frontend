@@ -528,7 +528,31 @@ class SimulationChart:
             chart_key = f"{self.key}_altair_static"
 
         if combined_chart is not None:
-            st.altair_chart(combined_chart, use_container_width=True, key=chart_key)
+            # Add a bottom legend using Altair's built-in legend (via a small legend-only chart)
+            try:
+                try:
+                    current_theme = st.context.theme.type
+                except Exception:
+                    current_theme = 'light'
+                legend_text_color = '#FFFFFF' if current_theme == 'dark' else '#000000'
+
+                # Build legend entries (keep it simple and stable)
+                legend_labels = ['Historical', 'Now', 'True Future (unknown)', 'Forecast']
+                legend_colors = ['#1f77b4', 'red', '#9ecae1', '#ff7f0e']
+
+                legend_df = pd.DataFrame({'label': legend_labels})
+                legend_chart = alt.Chart(legend_df).mark_point(opacity=0).encode(
+                    color=alt.Color(
+                        'label:N',
+                        scale=alt.Scale(domain=legend_labels, range=legend_colors),
+                        legend=alt.Legend(orient='bottom', direction='horizontal', title=None, labelColor=legend_text_color)
+                    )
+                ).properties(height=30, width='container')
+
+                final_chart = alt.vconcat(combined_chart, legend_chart, spacing=4)
+                st.altair_chart(final_chart, use_container_width=True, key=chart_key)
+            except Exception:
+                st.altair_chart(combined_chart, use_container_width=True, key=chart_key)
         else:
             st.warning(f"Unable to render chart for {target_column}. Chart creation failed.")
     

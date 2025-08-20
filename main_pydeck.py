@@ -86,14 +86,14 @@ st.subheader("⚙️ Dashboard Configuration")
 # Model scope selector
 model_scope = st.radio(
     "Model scope",
-    options=["Global", "Local"],
+    options=["Standard operation", "Full network outage"],
     index=0,
     horizontal=True,
     key="model_scope_selector",
-    help="Global: normal operation. Local: mark all locations inactive and use local forecasts if available."
+    help="Standard operation: Uses all available sensor information within the network. Full network outage: Treats all external sensor information as inactive and use only local measurements for the forecasts."
 )
-is_local_mode = (model_scope == "Local")
-is_global_mode = (model_scope == "Global")
+is_local_mode = (model_scope == "Full network outage")
+is_global_mode = (model_scope == "Standard operation")
 
 # Local model selector (only visible in Local mode)
 local_model_choice = None
