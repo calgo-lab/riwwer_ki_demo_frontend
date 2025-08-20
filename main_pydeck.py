@@ -80,41 +80,41 @@ y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
 #         st.metric("Y-Axis Range", f"[{y_axis_bounds[0]:.1f}, {y_axis_bounds[1]:.1f}]")
 #         st.caption("Fixed bounds (±0.5 rounded)")
 
-# Configuration options
-st.subheader("⚙️ Dashboard Configuration")
-
-# Model scope selector
-model_scope = st.radio(
-    "Model scope",
-    options=["Standard operation", "Full network outage"],
-    index=0,
-    horizontal=True,
-    key="model_scope_selector",
-    help="Standard operation: Uses all available sensor information within the network. Full network outage: Treats all external sensor information as inactive and use only local measurements for the forecasts."
-)
-is_local_mode = (model_scope == "Full network outage")
-is_global_mode = (model_scope == "Standard operation")
-
-# Local model selector (only visible in Local mode)
-local_model_choice = None
-if is_local_mode:
-    local_model_choice = st.radio(
-        "Local model",
-        options=["LSTM", "Transformer"],
+# Configuration options (now expandable)
+with st.expander("⚙️ Dashboard Configuration", expanded=False):
+    # Model scope selector
+    model_scope = st.radio(
+        "Model scope",
+        options=["Standard operation", "Full network outage"],
         index=0,
         horizontal=True,
-        key="local_model_selector",
-        help="Choose which local model's predictions to visualize."
+        key="model_scope_selector",
+        help="Standard operation: Uses all available sensor information within the network. Full network outage: Treats all external sensor information as inactive and use only local measurements for the forecasts."
     )
-elif is_global_mode:
-    global_model_choice = st.radio(
-        "Global model",
-        options=["TFT", "LSTM"],
-        index=0,
-        horizontal=True,
-        key="global_model_selector",
-        help="Choose which global model's predictions to visualize (12-step ahead)."
-    )
+    is_local_mode = (model_scope == "Full network outage")
+    is_global_mode = (model_scope == "Standard operation")
+
+    # Local model selector (only visible in Local mode)
+    local_model_choice = None
+    global_model_choice = None
+    if is_local_mode:
+        local_model_choice = st.radio(
+            "Local model",
+            options=["LSTM", "Transformer"],
+            index=0,
+            horizontal=True,
+            key="local_model_selector",
+            help="Choose which local model's predictions to visualize."
+        )
+    elif is_global_mode:
+        global_model_choice = st.radio(
+            "Global model",
+            options=["TFT", "LSTM"],
+            index=0,
+            horizontal=True,
+            key="global_model_selector",
+            help="Choose which global model's predictions to visualize (12-step ahead)."
+        )
 
 # Initialize components using the smooth TimeSliderLive approach
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
@@ -172,15 +172,17 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
     marker_ring_points = []  # Outer rings for emphasis
     marker_icons = []        # Icon-like center points
     label_points = []        # Text labels
+    target_highlight_points = []  # Subtle highlight for Kläranlage
     
     for _, row in dynamic_map_data.iterrows():
         lat = row["latitude"]
         lon = row["longitude"]
         location_name = row["info"]
         sensor_statuses = row["sensor_statuses"]
+        is_target_location = (location_name == "Kläranlage")
 
         # In Local mode, force all sensors to inactive for each location
-        if model_scope == "Local":
+        if model_scope == "Full network outage":
             sensor_list = SENSOR_GROUPS.get(location_name, [])
             sensor_statuses = [
                 {
@@ -205,9 +207,7 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
         base_size = BASE_MARKER_SIZE
         ring_size = BASE_MARKER_SIZE * RING_SIZE_MULTIPLIER
         icon_size = BASE_MARKER_SIZE * ICON_SIZE_MULTIPLIER
-        
-        # Create marker-like visualization with multiple layers
-        
+
         # 1. Base marker (filled circle) - CONSISTENT SIZE
         marker_base_points.append({
             'lon': lon,
@@ -219,9 +219,10 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
             'inactive_sensors': total_sensors - active_sensors,
             'total_sensors': total_sensors,
             'activity_percentage': activity_percentage,
-            'elevation': 0
+            'elevation': 0,
+            'note': 'Sewage Treatment Facility<br>Location of filling level forecasts' if is_target_location else ''
         })
-        
+
         # 2. Outer ring for emphasis - CONSISTENT SIZE
         ring_color = color[:3] + [80]  # Same color but more transparent
         marker_ring_points.append({
@@ -242,7 +243,7 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
             'lon': lon,
             'lat': lat,
             'location': location_name,
-            'color': [255, 255, 255, 255],  # White center
+            'color': [156, 39, 176, 255] if is_target_location else [255, 255, 255, 255],  # Purple for target
             'size': icon_size,  # Consistent icon size
             'active_sensors': active_sensors,
             'inactive_sensors': total_sensors - active_sensors,
@@ -250,6 +251,17 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
             'activity_percentage': activity_percentage,
             'elevation': 10
         })
+
+        # 3b. Dedicated subtle highlight ring for Kläranlage (thin azure outline)
+        if is_target_location:
+            target_highlight_points.append({
+                'lon': lon,
+                'lat': lat,
+                'location': location_name,
+                # Larger than the standard ring to appear as a distinct outer ring
+                'size': base_size * (RING_SIZE_MULTIPLIER + 0.2),
+                'elevation': 8
+            })
         
         # 4. Labels with better positioning
         # Determine label color based on activity
@@ -272,7 +284,8 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
         pd.DataFrame(marker_base_points), 
         pd.DataFrame(marker_ring_points),
         pd.DataFrame(marker_icons),
-        pd.DataFrame(label_points)
+        pd.DataFrame(label_points),
+        pd.DataFrame(target_highlight_points)
     )
 
 def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Series, iteration: int):
@@ -286,8 +299,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     with col1:
         st.metric("Index", f"{idx + 1:,} / {len(vierlinden_data):,}")
     with col2:
-        st.metric("Timestamp", timestamp.strftime("%H:%M:%S"))
-        st.caption(timestamp.strftime("%Y-%m-%d"))
+        st.metric("Datetime", timestamp.strftime("%Y-%m-%d"))
+        st.caption(timestamp.strftime("%H:%M:%S"))
     with col3:
         current_value = data_row[TARGET_COLUMN]
         st.metric(TARGET_COLUMN, f"{current_value:.2f}")
@@ -306,7 +319,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         st.metric("Progress", f"{progress_pct:.1f}%")
 
     # Main content area: Split into three columns for better layout
-    st.subheader("🗺️ Live Map & Simulation View")
+    st.subheader("🗺️ Live Sensor States, Model Forecasts and Rainfall")
     
     # Create three columns: Map | Overview | Chart
     map_col, overview_col, chart_col = st.columns([1.4, 0.5, 2], gap="small")
@@ -315,7 +328,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     with map_col:
         st.markdown("**📍 Real-time Sensor Map**")
         # Prepare enhanced map data with multiple layers
-        marker_base_data, marker_ring_data, marker_icon_data, label_data = prepare_map_data(data_row, timestamp, model_scope)
+        marker_base_data, marker_ring_data, marker_icon_data, label_data, target_highlight_data = prepare_map_data(data_row, timestamp, model_scope)
         
         # Create multiple layers for marker-like appearance
         layers = []
@@ -337,6 +350,26 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             get_elevation='elevation'
         )
         layers.append(ring_layer)
+
+        # 1b. Subtle highlight ring for Kläranlage only (bold purple outline)
+        if target_highlight_data is not None and not target_highlight_data.empty:
+            target_layer = pdk.Layer(
+                'ScatterplotLayer',
+                target_highlight_data,
+                get_position='[lon, lat]',
+                get_color=[156, 39, 176, 0],  # no fill, purple hue
+                get_radius='size',
+                pickable=False,
+                filled=False,               # render as ring only
+                stroked=True,
+                line_width_min_pixels=5,  # bolder outline
+                line_width_max_pixels=5,
+                get_line_color=[156, 39, 176, 245],
+                elevation_scale=2,
+                elevation_range=[0, 30],
+                get_elevation='elevation'
+            )
+            layers.append(target_layer)
         
         # 2. Base marker layer (main colored circle)
         marker_layer = pdk.Layer(
@@ -362,7 +395,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             'ScatterplotLayer',
             marker_icon_data,
             get_position='[lon, lat]',
-            get_color='color',
+            get_color=[255, 255, 255, 255],
             get_radius='size',
             pickable=False,
             elevation_scale=3,
@@ -379,7 +412,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 label_data,
                 get_position='[lon, lat]',
                 get_text='text',
-                get_color='background_color',
+                get_color=[128, 128, 128, 128],  # Black text
                 get_size=13,  # Slightly larger for background effect
                 get_alignment_baseline="'middle'",
                 get_text_anchor="'middle'",
@@ -393,7 +426,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 label_data,
                 get_position='[lon, lat]',
                 get_text='text',
-                get_color='color',
+                get_color=[255, 255, 255, 255],  # White text
                 get_size=11,
                 get_alignment_baseline="'middle'",
                 get_text_anchor="'middle'",
@@ -418,7 +451,8 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                     <div style="background: rgba(0,0,0,0.8); color: white; padding: 10px; border-radius: 5px;">
                         <b>📍 {location}</b><br/>
                         <span style="color: #4CAF50;">●</span> Active: {active_sensors}<br/>
-                        <span style="color: #FF5722;">●</span> Inactive: {inactive_sensors}
+                        <span style="color: #FF5722;">●</span> Inactive: {inactive_sensors}<br/>
+                        <i>{note}</i>
                     </div>
                 ''',
                 'style': {
@@ -440,7 +474,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 "Local mode is active. All locations are treated as inactive and sensor measurements are not considered.",
                 icon="⚠️",
             )
-        marker_base_data, _, _, _ = prepare_map_data(data_row, timestamp, model_scope)
+        marker_base_data, _, _, _, _ = prepare_map_data(data_row, timestamp, model_scope)
         
         # Calculate overview statistics
         total_locations = len(marker_base_data)
@@ -462,7 +496,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
 
     # Right column: Simulation Chart  
     with chart_col:
-        st.markdown("**📈 Simulation Chart**")
+        st.markdown("**📈 Filling Level History and Model Forecasts**")
         # Compute local one-step-ahead forecast value if in Local mode
         forecast_value = None
         forecast_series = None
@@ -509,15 +543,14 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             iteration=iteration,
             show_checkbox=False,  # Disable internal checkbox to avoid conflicts
             y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
-            height=550,
+            height=450,
             forecast_value=forecast_value,  # Local one-step ahead
             forecast_series=forecast_series,   # Global multi-step ahead [t+1..t+12]
             is_local_mode=is_local_mode
         )
 
     # Full-width Rainfall Bar Chart
-    st.markdown("---")
-    st.markdown("**🌧️ Rainfall (History + 12h Forecast)**")
+    st.markdown("**🌧️ Rainfall 72h-History (upper) and 12h-Forecast (lower)**")
     rainfall_chart.render(
         data=vierlinden_data,
         current_timestamp=timestamp,
@@ -526,7 +559,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         default_history_hours=72,
         future_hours=12,
         height=260,
-        show_controls=True,
+        show_controls=False,
         is_playing=st.session_state.get("pydeck_main_is_playing", False),
     )
 

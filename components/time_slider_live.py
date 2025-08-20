@@ -291,8 +291,8 @@ class TimeSliderLive:
         """
         # Show controls at the top
         if show_controls:
-            st.subheader("Time Navigation Controls")
-            self.render_controls()
+            with st.expander("Time Navigation Controls", expanded=True):
+                self.render_controls()
 
         # Create placeholder for the main content
         placeholder = st.empty()
