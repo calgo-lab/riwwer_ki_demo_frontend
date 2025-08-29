@@ -36,5 +36,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:8501/_stcore/health || exit 1
 
 # Run the Streamlit app
-CMD ["python", "-m", "streamlit", "run", "main_pydeck.py", "--server.port=8501", "--server.address=0.0.0.0", "--browser.gatherUsageStats=false"]
+CMD ["python", "-m", "streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0", "--browser.gatherUsageStats=false"]
 
