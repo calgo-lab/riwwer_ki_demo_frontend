@@ -512,6 +512,17 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 # Create riskometer using Streamlit components
                 st.markdown("**Overflow Risk in the coming 2 hours at WWTP Location**")
 
+                # Add tooltip with explanation
+                with st.expander("ℹ️ What does this mean?", expanded=False):
+                    st.markdown("""
+                    **Overflow Risk Assessment:**
+                    - **LOW RISK (0-33%)**: Minimal chance of overflow in the next 2 hours
+                    - **MEDIUM RISK (33-67%)**: Moderate chance of overflow, monitoring recommended
+                    - **HIGH RISK (67-100%)**: High chance of overflow, immediate attention required
+
+                    The risk is calculated based on current filling levels, rainfall characteristics, and historical patterns.
+                    """)
+
                 # Risk meter visualization
                 col1, col2, col3 = st.columns([1, 1, 1])
 
