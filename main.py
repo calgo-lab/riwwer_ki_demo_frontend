@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
@@ -63,13 +64,14 @@ global_preds = _load_global_preds(GLOBAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLU
 
 # Load overflow probability for riskometer predictions
 @st.cache_data(ttl=900)
-def _load_cls_predictions() -> pd.DataFrame | None:
+def _load_overflow_cls_predictions() -> pd.DataFrame | None:
     try:
-        df = pd.read_csv("data/cls_hourly_predictions.csv", parse_dates=["Datetime"], index_col="Datetime")
+        df = pd.read_csv(os.path.join(os.path.dirname(__file__), "data", "cls_hourly_predictions.csv"),
+        parse_dates=["Datetime"], index_col="Datetime")
         return df
     except Exception:
         return None
-cls_predictions = _load_cls_predictions()
+overflow_cls_predictions = _load_overflow_cls_predictions()
 
 # Calculate fixed y-axis bounds for consistent chart scaling
 y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
@@ -476,7 +478,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
 
         # overflowriskometer component
-        overflow_riskometer = OverflowRiskometer(cls_predictions, timestamp)
+        overflow_riskometer = OverflowRiskometer(overflow_cls_predictions, timestamp)
         overflow_riskometer.render()
 
     # Middle column: Current Overview & Legend
