@@ -510,7 +510,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                     risk_level = "🔴"
 
                 # Create riskometer using Streamlit components
-                st.markdown("**Risk Assessment**")
+                st.markdown("**Overflow Risk in the coming 2 hours at WWTP Location**")
 
                 # Risk meter visualization
                 col1, col2, col3 = st.columns([1, 1, 1])
