@@ -22,7 +22,7 @@ from utils.config import (
     GLOBAL_LSTM_PRED_COLUMN,
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
-from components import TimeSliderLive, SimulationChart, RainfallBarChart
+from components import TimeSliderLive, SimulationChart, RainfallBarChart, OverflowRiskometer
 
 st.set_page_config(
     page_title="RIWWER KI Demo",
@@ -61,7 +61,7 @@ def _load_global_preds(path: str, time_col: str) -> pd.DataFrame | None:
 
 global_preds = _load_global_preds(GLOBAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLUMN)
 
-# Load CLS hourly predictions for flashing ball color
+# Load overflow probability for riskometer predictions
 @st.cache_data(ttl=900)
 def _load_cls_predictions() -> pd.DataFrame | None:
     try:
@@ -69,7 +69,6 @@ def _load_cls_predictions() -> pd.DataFrame | None:
         return df
     except Exception:
         return None
-
 cls_predictions = _load_cls_predictions()
 
 # Calculate fixed y-axis bounds for consistent chart scaling
@@ -476,85 +475,9 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         # This is the key - using a unique key based on iteration prevents flickering
         st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
 
-        # Add riskometer under the map
-        st.markdown("---")
-
-        # Get CLS prediction value for current timestamp to determine risk level
-        cls_value = None
-        if cls_predictions is not None and timestamp in cls_predictions.index:
-            try:
-                cls_value = cls_predictions.loc[timestamp, 'predicitons_hourly_cls']
-                if pd.isna(cls_value):
-                    cls_value = None
-            except Exception:
-                cls_value = None
-
-                # Create riskometer using Streamlit components
-        if cls_value is not None:
-            try:
-                # Normalize to 0-1 range
-                normalized_value = max(0, min(1, float(cls_value)))
-
-                # Determine risk zone and color
-                if normalized_value < 0.33:
-                    risk_zone = "LOW RISK"
-                    zone_color = "#4CAF50"  # Green
-                    risk_level = "🟢"
-                elif normalized_value < 0.67:
-                    risk_zone = "MEDIUM RISK"
-                    zone_color = "#FF9800"  # Orange
-                    risk_level = "🟡"
-                else:
-                    risk_zone = "HIGH RISK"
-                    zone_color = "#F44336"  # Red
-                    risk_level = "🔴"
-
-                # Create riskometer using Streamlit components
-                st.markdown("**Overflow Risk in the coming 2 hours at WWTP Location**")
-
-                # Add tooltip with explanation
-                with st.expander("ℹ️ What does this mean?", expanded=False):
-                    st.markdown("""
-                    **Overflow Risk Assessment:**
-                    - **LOW RISK (0-33%)**: Minimal chance of overflow in the next 2 hours
-                    - **MEDIUM RISK (33-67%)**: Moderate chance of overflow, monitoring recommended
-                    - **HIGH RISK (67-100%)**: High chance of overflow, immediate attention required
-
-                    The risk is calculated based on current filling levels, rainfall characteristics, and historical patterns.
-                    """)
-
-                # Risk meter visualization
-                col1, col2, col3 = st.columns([1, 1, 1])
-
-                with col1:
-                    if normalized_value < 0.33:
-                        st.markdown(f"<div style='text-align: center; padding: 20px; background: {zone_color}; color: white; border-radius: 10px; font-weight: bold;'>{risk_level}<br>LOW</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div style='text-align: center; padding: 20px; background: #e0e0e0; color: #666; border-radius: 10px;'>🟢<br>LOW</div>", unsafe_allow_html=True)
-
-                with col2:
-                    if 0.33 <= normalized_value < 0.67:
-                        st.markdown(f"<div style='text-align: center; padding: 20px; background: {zone_color}; color: white; border-radius: 10px; font-weight: bold;'>{risk_level}<br>MEDIUM</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div style='text-align: center; padding: 20px; background: #e0e0e0; color: #666; border-radius: 10px;'>🟡<br>MEDIUM</div>", unsafe_allow_html=True)
-
-                with col3:
-                    if normalized_value >= 0.67:
-                        st.markdown(f"<div style='text-align: center; padding: 20px; background: {zone_color}; color: white; border-radius: 10px; font-weight: bold;'>{risk_level}<br>HIGH</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div style='text-align: center; padding: 20px; background: #e0e0e0; color: #666; border-radius: 10px;'>🔴<br>HIGH</div>", unsafe_allow_html=True)
-
-                # Progress bar showing exact position
-                st.progress(normalized_value)
-
-                # Current status
-                st.markdown(f"**Current Status:** {risk_zone}")
-                st.markdown(f"**Overflow Probability:** {cls_value:.3f}")
-
-            except Exception:
-                st.error("Error loading risk data")
-        else:
-            st.info("No CLS prediction data available")
+        # overflowriskometer component
+        overflow_riskometer = OverflowRiskometer(cls_predictions, timestamp)
+        overflow_riskometer.render()
 
     # Middle column: Current Overview & Legend
     with overview_col:
