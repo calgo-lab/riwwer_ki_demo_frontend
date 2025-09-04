@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import pydeck as pdk
@@ -20,9 +21,10 @@ from utils.config import (
     GLOBAL_PREDICTIONS_PATH,
     GLOBAL_TFT_PRED_COLUMN,
     GLOBAL_LSTM_PRED_COLUMN,
+    OVERFLOW_CLS_PRED_FILE_PATH
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
-from components import TimeSliderLive, SimulationChart, RainfallBarChart
+from components import TimeSliderLive, SimulationChart, RainfallBarChart, OverflowRiskometer
 
 st.set_page_config(
     page_title="RIWWER KI Demo",
@@ -60,6 +62,17 @@ def _load_global_preds(path: str, time_col: str) -> pd.DataFrame | None:
         return None
 
 global_preds = _load_global_preds(GLOBAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLUMN)
+
+# Load overflow probability for riskometer predictions
+@st.cache_data(ttl=900)
+def _load_overflow_cls_predictions() -> pd.DataFrame | None:
+    try:
+        df = pd.read_csv(OVERFLOW_CLS_PRED_FILE_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN],
+                                                    index_col=PREDICTIONS_TIME_COLUMN)
+        return df
+    except Exception:
+        return None
+overflow_cls_predictions = _load_overflow_cls_predictions()
 
 # Calculate fixed y-axis bounds for consistent chart scaling
 y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
@@ -149,10 +162,10 @@ def get_marker_color_and_size(sensor_statuses):
     """Determine marker color based on sensor status - SIZE IS NOW CONSISTENT"""
     if not sensor_statuses:
         return [128, 128, 128, 180]  # Gray for no sensors
-    
+
     active_sensors = sum(1 for s in sensor_statuses if s["Status"] == "active")
     total_sensors = len(sensor_statuses)
-    
+
     if total_sensors == 0:
         return [128, 128, 128, 180]  # Gray
     elif active_sensors == total_sensors:
@@ -166,14 +179,14 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
     """Prepare enhanced marker data for Pydeck visualization"""
     # Build dynamic map data using current row
     dynamic_map_data = build_dynamic_map_data_from_row(map_data, data_row, timestamp)
-    
+
     # Prepare data for multiple layer types
     marker_base_points = []  # Base circles
     marker_ring_points = []  # Outer rings for emphasis
     marker_icons = []        # Icon-like center points
     label_points = []        # Text labels
     target_highlight_points = []  # Subtle highlight for Kläranlage
-    
+
     for _, row in dynamic_map_data.iterrows():
         lat = row["latitude"]
         lon = row["longitude"]
@@ -194,15 +207,15 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
                 }
                 for s in sensor_list
             ]
-        
+
         # Get color based on sensor status (size is now consistent)
         color = get_marker_color_and_size(sensor_statuses)
-        
+
         # Calculate status metrics
         active_sensors = sum(1 for s in sensor_statuses if s["Status"] == "active")
         total_sensors = len(sensor_statuses)
         activity_percentage = 100 * (active_sensors / max(total_sensors, 1))
-        
+
         # Use consistent sizes for all markers
         base_size = BASE_MARKER_SIZE
         ring_size = BASE_MARKER_SIZE * RING_SIZE_MULTIPLIER
@@ -237,7 +250,7 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
             'activity_percentage': activity_percentage,
             'elevation': 5
         })
-        
+
         # 3. Icon center - CONSISTENT SIZE
         marker_icons.append({
             'lon': lon,
@@ -262,12 +275,12 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
                 'size': base_size * (RING_SIZE_MULTIPLIER + 0.2),
                 'elevation': 8
             })
-        
+
         # 4. Labels with better positioning
         # Determine label color based on activity
         label_color = [255, 255, 255, 255] if activity_percentage > 0.5 else [0, 0, 0, 255]
         label_bg_color = [0, 0, 0, 180] if activity_percentage > 0.5 else [255, 255, 255, 200]
-        
+
         label_points.append({
             'lon': lon,
             'lat': lat - 0.0008,  # Position below marker
@@ -279,9 +292,9 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
             'inactive_sensors': total_sensors - active_sensors,
             'total_sensors': total_sensors
         })
-    
+
     return (
-        pd.DataFrame(marker_base_points), 
+        pd.DataFrame(marker_base_points),
         pd.DataFrame(marker_ring_points),
         pd.DataFrame(marker_icons),
         pd.DataFrame(label_points),
@@ -290,7 +303,7 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
 
 def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Series, iteration: int):
     """Content renderer for smooth updates using the TimeSliderLive pattern"""
-    
+
     # Current data display at the top
     st.subheader("📊 Current Data Point")
 
@@ -320,7 +333,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
 
     # Main content area: Split into three columns for better layout
     st.subheader("🗺️ Live Sensor States, Model Forecasts and Rainfall")
-    
+
     # Create three columns: Map | Overview | Chart
     map_col, overview_col, chart_col = st.columns([1.4, 0.5, 2], gap="small")
 
@@ -329,10 +342,10 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         st.markdown("**📍 Real-time Sensor Map**")
         # Prepare enhanced map data with multiple layers
         marker_base_data, marker_ring_data, marker_icon_data, label_data, target_highlight_data = prepare_map_data(data_row, timestamp, model_scope)
-        
+
         # Create multiple layers for marker-like appearance
         layers = []
-        
+
         # 1. Outer ring layer (rendered first, behind everything)
         ring_layer = pdk.Layer(
             'ScatterplotLayer',
@@ -370,7 +383,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 get_elevation='elevation'
             )
             layers.append(target_layer)
-        
+
         # 2. Base marker layer (main colored circle)
         marker_layer = pdk.Layer(
             'ScatterplotLayer',
@@ -389,7 +402,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             get_elevation='elevation'
         )
         layers.append(marker_layer)
-        
+
         # 3. Icon center layer (white dot to simulate RSS icon)
         icon_layer = pdk.Layer(
             'ScatterplotLayer',
@@ -403,7 +416,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             get_elevation='elevation'
         )
         layers.append(icon_layer)
-        
+
         # 4. Text labels with background effect
         if label_data is not None and not label_data.empty:
             # Background layer for labels (slightly larger, darker)
@@ -419,7 +432,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 font_weight='bold'
             )
             layers.append(label_bg_layer)
-            
+
             # Foreground text layer
             text_layer = pdk.Layer(
                 'TextLayer',
@@ -433,7 +446,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 font_weight='bold'
             )
             layers.append(text_layer)
-            
+
         # Create deck with stable view state (no flicker!)
         view_state = pdk.ViewState(
             latitude=center_lat,
@@ -442,7 +455,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             pitch=0,  # Slight 3D angle to show elevation
             bearing=0
         )
-        
+
         deck = pdk.Deck(
             layers=layers,
             initial_view_state=view_state,
@@ -461,10 +474,14 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 }
             }
         )
-        
+
         # This is the key - using a unique key based on iteration prevents flickering
         st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
-            
+
+        # overflowriskometer component
+        overflow_riskometer = OverflowRiskometer(overflow_cls_predictions, timestamp, is_local_mode=is_local_mode)
+        overflow_riskometer.render()
+
     # Middle column: Current Overview & Legend
     with overview_col:
         st.markdown("**📊 Current Overview**")
@@ -475,17 +492,17 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 icon="⚠️",
             )
         marker_base_data, _, _, _, _ = prepare_map_data(data_row, timestamp, model_scope)
-        
+
         # Calculate overview statistics
         total_locations = len(marker_base_data)
         active_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 100])
         inactive_locations = len(marker_base_data[marker_base_data['activity_percentage'] == 0])
-        
+
         # Display as metrics
         st.metric("📍 Total Locations", total_locations)
         st.metric("🟢 Fully Active", active_locations)
         st.metric("🔴 Inactive", inactive_locations)
-        
+
         # Calculate overall network health
         if total_locations > 0:
             network_health = ((active_locations * 100)) / total_locations
@@ -494,7 +511,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             if is_local_mode:
                 st.caption("Network health reflects forced inactivity in Local mode.")
 
-    # Right column: Simulation Chart  
+    # Right column: Simulation Chart
     with chart_col:
         st.markdown("**📈 Filling Level History and Model Forecasts**")
         # Compute local one-step-ahead forecast value if in Local mode
@@ -588,7 +605,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     #             sensor_names = [s.get("Sensor") for s in sensor_statuses if isinstance(s, dict) and "Sensor" in s]
 
     #             with st.expander(f"📍 {location} — {len(sensor_names)} sensors", expanded=False):
-    #                 base_key = f"sensor_trends_{location}"                    
+    #                 base_key = f"sensor_trends_{location}"
     #                 widget_key = f"{base_key}_{iteration}"
 
     #                 # Only render charts on demand to reduce lag
