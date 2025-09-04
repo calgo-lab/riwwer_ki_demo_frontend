@@ -479,7 +479,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
         st.pydeck_chart(deck, use_container_width=True, key=f"enhanced_pydeck_map_{iteration}")
 
         # overflowriskometer component
-        overflow_riskometer = OverflowRiskometer(overflow_cls_predictions, timestamp)
+        overflow_riskometer = OverflowRiskometer(overflow_cls_predictions, timestamp, is_local_mode=is_local_mode)
         overflow_riskometer.render()
 
     # Middle column: Current Overview & Legend

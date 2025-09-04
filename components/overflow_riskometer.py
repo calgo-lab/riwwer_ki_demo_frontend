@@ -16,7 +16,9 @@ class OverflowRiskometer:
                                        with timestamps as index and 'predicitons_hourly_cls' column
         timestamp (pd.Timestamp): Current timestamp for which to display risk assessment
     """
-    def __init__(self, cls_predictions: pd.DataFrame, timestamp: pd.Timestamp, key: str = "predicitons_hourly_cls"):
+    def __init__(self, cls_predictions: pd.DataFrame,
+    timestamp: pd.Timestamp, key: str = "predicitons_hourly_cls",
+    is_local_mode: bool = False):
         """
         Initialize the OverflowRiskometer component.
 
@@ -30,6 +32,7 @@ class OverflowRiskometer:
         self.cls_predictions = cls_predictions
         self.timestamp = timestamp
         self.key = key
+        self.is_local_mode = is_local_mode
 
     def render(self):
         """
@@ -66,6 +69,15 @@ class OverflowRiskometer:
         # Create riskometer using Streamlit components
         if cls_value is not None:
             try:
+                # Show warning for local mode and exit early
+                if self.is_local_mode:
+                    st.markdown("**Overflow Risk in the coming 2 hours at the Sewage Treatment Facility Location**")
+                    st.warning(
+                        "**Local mode is active. All locations are treated as inactive and sensor measurements are not considered..",
+                        icon="⚠️"
+                    )
+                    return
+
                 # Normalize to 0-1 range
                 normalized_value = max(0, min(1, float(cls_value)))
 
