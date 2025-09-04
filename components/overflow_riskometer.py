@@ -3,7 +3,7 @@ import pandas as pd
 
 class OverflowRiskometer:
     """
-    A Streamlit component for displaying overflow riskometer at Verlinden WWTP location.
+    A Streamlit component for displaying overflow riskometer at Verlinden Sewage Treatment Facility location.
 
     This class creates an interactive riskometer that visualizes the probability
     of overflow events based on HistGradientBoostingClassifier algorithm predictions.
@@ -84,7 +84,7 @@ class OverflowRiskometer:
                     risk_level = "🔴"
 
                 # Create riskometer using Streamlit components
-                st.markdown("**Overflow Risk in the coming 2 hours at WWTP Location**")
+                st.markdown("**Overflow Risk in the coming 2 hours at the Sewage Treatment Facility Location**")
 
                 # Add tooltip with explanation
                 with st.expander("ℹ️ What does this mean?", expanded=False):
