@@ -214,5 +214,5 @@ __marimo__/
 
 .python-version
 data/
-Pipefile
+Pipfile
 Pipfile.lock
