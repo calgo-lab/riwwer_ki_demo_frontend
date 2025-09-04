@@ -21,7 +21,6 @@ from utils.config import (
     GLOBAL_PREDICTIONS_PATH,
     GLOBAL_TFT_PRED_COLUMN,
     GLOBAL_LSTM_PRED_COLUMN,
-    OVERFLOW_CLS_PRED_COLUMN,
     OVERFLOW_CLS_PRED_FILE_PATH
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data

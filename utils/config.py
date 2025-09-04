@@ -147,5 +147,4 @@ GLOBAL_TFT_PRED_COLUMN = "TFT Predictions"
 GLOBAL_LSTM_PRED_COLUMN = "LSTM Predictions"
 
 # Overflow probability predictions
-OVERFLOW_CLS_PRED_COLUMN = "Overflow Class Predictions"
 OVERFLOW_CLS_PRED_FILE_PATH = os.path.join("data", "cls_hourly_predictions.csv")
