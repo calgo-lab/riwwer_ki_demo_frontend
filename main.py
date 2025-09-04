@@ -21,6 +21,8 @@ from utils.config import (
     GLOBAL_PREDICTIONS_PATH,
     GLOBAL_TFT_PRED_COLUMN,
     GLOBAL_LSTM_PRED_COLUMN,
+    OVERFLOW_CLS_PRED_COLUMN,
+    OVERFLOW_CLS_PRED_FILE_PATH
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart, RainfallBarChart, OverflowRiskometer
@@ -66,8 +68,8 @@ global_preds = _load_global_preds(GLOBAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLU
 @st.cache_data(ttl=900)
 def _load_overflow_cls_predictions() -> pd.DataFrame | None:
     try:
-        df = pd.read_csv(os.path.join(os.path.dirname(__file__), "data", "cls_hourly_predictions.csv"),
-        parse_dates=["Datetime"], index_col="Datetime")
+        df = pd.read_csv(OVERFLOW_CLS_PRED_FILE_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN],
+                                                    index_col=PREDICTIONS_TIME_COLUMN)
         return df
     except Exception:
         return None
