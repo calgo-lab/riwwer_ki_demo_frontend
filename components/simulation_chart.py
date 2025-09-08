@@ -449,7 +449,9 @@ class SimulationChart:
         if actual_window_start > window_start:
             missing_box = BoxAnnotation(left=window_start.to_pydatetime(), right=actual_window_start.to_pydatetime(), fill_color='lightblue', fill_alpha=0.15)
             p.add_layout(missing_box)
-        future_box = BoxAnnotation(left=current_ts.to_pydatetime(), right=window_end.to_pydatetime(), fill_color='lightgray', fill_alpha=0.2)
+        # Extend future shading over the additional right margin in local mode
+        future_right = plot_x_end if is_local_mode else window_end
+        future_box = BoxAnnotation(left=current_ts.to_pydatetime(), right=future_right.to_pydatetime(), fill_color='lightgray', fill_alpha=0.2)
         p.add_layout(future_box)
 
         # Lines and points
