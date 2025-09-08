@@ -129,9 +129,23 @@ with st.expander("⚙️ Dashboard Configuration", expanded=False):
             help="Choose which global model's predictions to visualize (12-step ahead)."
         )
 
+    # Chart renderer selection
+    renderer_choice = st.radio(
+        "Chart renderer",
+        options=["Bokeh", "Matplotlib"],
+        index=0,
+        horizontal=True,
+        key="chart_renderer_selector",
+        help="Bokeh for smooth interactive, Matplotlib for lightweight static."
+    )
+
 # Initialize components using the smooth TimeSliderLive approach
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
-simulation_chart = SimulationChart(key="pydeck_simulation_chart", interactive=True)
+simulation_chart = SimulationChart(
+    key="pydeck_simulation_chart",
+    interactive=True,
+    renderer=("bokeh" if renderer_choice == "Bokeh" else "matplotlib"),
+)
 rainfall_chart = RainfallBarChart(key="pydeck_rainfall_chart")
 
 # Pre-calculate map center based on bounding box (not just coordinate average)
@@ -560,7 +574,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
             iteration=iteration,
             show_checkbox=False,  # Disable internal checkbox to avoid conflicts
             y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
-            height=450,
+            height=600,
             forecast_value=forecast_value,  # Local one-step ahead
             forecast_series=forecast_series,   # Global multi-step ahead [t+1..t+12]
             is_local_mode=is_local_mode
@@ -686,7 +700,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
 time_slider.run_live_dashboard(
     content_renderer=smooth_content_renderer,
     hours_per_second=1.0,  # This will be controlled by the TimeSliderLive speed controls
-    updates_per_second=2.0,  # Smooth update rate
+    updates_per_second=4.0,  # Smooth update rate
     show_controls=True,
     show_progress=True,
     max_iterations=2000,
