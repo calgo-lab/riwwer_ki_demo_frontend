@@ -39,13 +39,14 @@ st.markdown(
     """
     <style>
     .panel-header {
-        background: #e8f1ff;
+        background: #c2cbfc;
         border-left: 4px solid #1f6feb;
         color: #0b63ce;
         padding: 0.4rem 0.75rem;
         font-weight: 600;
         border-radius: 4px;
         margin-bottom: 0.5rem;
+        font-size: 1.2rem;
     }
     </style>
     """,
@@ -604,7 +605,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
 
     with left_panel_col:
         with st.container(border=True):
-            st.markdown("<div class='panel-header'>Overflow Risk in the coming 2 hours at the Sewage Treatment Facility Location</div>", unsafe_allow_html=True)
+            st.markdown("<div class='panel-header'>Overflow Risk in the coming 2 hours</div>", unsafe_allow_html=True)
             overflow_riskometer = OverflowRiskometer(overflow_cls_predictions, timestamp, is_local_mode=is_local_mode)
             overflow_riskometer.render()
             st.markdown("</div>", unsafe_allow_html=True)
