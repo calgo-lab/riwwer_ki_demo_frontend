@@ -53,9 +53,6 @@ class OverflowRiskometer:
         Returns:
             None: Renders the component directly to Streamlit interface
         """
-        # Add riskometer under the map
-        st.markdown("---")
-
         # Get CLS prediction value for current timestamp to determine risk level
         cls_value = None
         if self.cls_predictions is not None and self.timestamp in self.cls_predictions.index:
@@ -71,7 +68,6 @@ class OverflowRiskometer:
             try:
                 # Show warning for local mode and exit early
                 if self.is_local_mode:
-                    st.markdown("**Overflow Risk in the coming 2 hours at the Sewage Treatment Facility Location**")
                     st.warning(
                         "**Local mode is active. All locations are treated as inactive and sensor measurements are not considered..",
                         icon="⚠️"
