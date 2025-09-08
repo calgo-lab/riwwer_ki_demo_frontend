@@ -183,19 +183,18 @@ class TimeSliderLive:
 
     def render_controls(self) -> None:
         """Render the control buttons."""
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            if st.button("⏮️ Start", key=f"{self.session_key}_start"):
-                self._reset_to_start()
-                st.session_state[f"{self.session_key}_skip_autoadvance"] = True
-
-        with col2:
-            if st.button("⏪ Back", key=f"{self.session_key}_back"):
+            # Pad to center it
+            st.write("")
+            if st.button("Back", key=f"{self.session_key}_back", icon="⏪"):
                 self._step_backward()
                 st.session_state[f"{self.session_key}_skip_autoadvance"] = True
 
-        with col3:
+        with col2:
+            # Pad to center it
+            st.write("")
             # Get current state and show appropriate button
             current_playing_state = st.session_state.get(
                 f"{self.session_key}_is_playing", False
@@ -203,13 +202,13 @@ class TimeSliderLive:
 
             if current_playing_state:
                 # Currently playing - show pause button
-                if st.button("⏸️ Pause", key=f"{self.session_key}_pause_btn"):
+                if st.button("**Pause**", key=f"{self.session_key}_pause_btn", type="primary", icon="⏸️"):
                     st.session_state[f"{self.session_key}_is_playing"] = False
                     # Force immediate refresh to show the new button state
                     st.rerun()
             else:
                 # Currently paused - show play button
-                if st.button("▶️ Play", key=f"{self.session_key}_play_btn"):
+                if st.button("**Play**", key=f"{self.session_key}_play_btn", type="primary", icon="▶️"):
                     st.session_state[f"{self.session_key}_is_playing"] = True
                     # Reset timing when starting to play
                     st.session_state[f"{self.session_key}_last_update_time"] = (
@@ -221,17 +220,23 @@ class TimeSliderLive:
                     # Force immediate refresh to show the new button state
                     st.rerun()
 
-        with col4:
-            if st.button("⏩ Forward", key=f"{self.session_key}_forward"):
+        with col3:
+            # Pad to center it
+            st.write("")
+            if st.button("Forward", key=f"{self.session_key}_forward", icon="⏩"):
                 self._step_forward()
                 st.session_state[f"{self.session_key}_skip_autoadvance"] = True
 
-        with col5:
-            if st.button("⏭️ End", key=f"{self.session_key}_end"):
-                self._reset_to_end()
-                st.session_state[f"{self.session_key}_skip_autoadvance"] = True
+        with col4:
+            # Pad to center it
+            st.write("")
+            st.write("")
+            if self._is_playing():
+                st.write(f"**Status:** ▶️ Playing")
+            else:
+                st.write(f"**Status:** ⏸️ Paused")
 
-        with col6:
+        with col5:
             # Speed control with better options
             speed_options = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0]
 
@@ -272,11 +277,9 @@ class TimeSliderLive:
     def run_live_dashboard(
         self,
         content_renderer: Callable[[int, pd.Timestamp, pd.Series, int], None],
-        hours_per_second: float = 24.0,
         updates_per_second: float = 2.0,
         show_controls: bool = True,
-        show_progress: bool = True,
-        max_iterations: int = 1000,
+        max_iterations: int = 1000
     ) -> None:
         """
         Run the live dashboard with continuous updates.
@@ -346,23 +349,23 @@ class TimeSliderLive:
                     st.session_state[rain_suppress_key] = True
                     st.session_state[rain_slider_ver_key] = st.session_state.get(rain_slider_ver_key, 0) + 1
 
-                if show_progress:
-                    col_s, col_t = st.columns([4, 2])
-                    with col_s:
-                        # Slider is 1-based for UX, mapped to 0-based internally
-                        slider_val = st.slider(
-                            "Select time step",
-                            min_value=1,
-                            max_value=len(self.data),
-                            value=int(baseline_idx + 1),
-                            step=1,
-                            key=f"{slider_key}_{st.session_state[time_slider_ver_key]}",
-                        )
-                    with col_t:
-                        # Convert slider value (1-based) to index (0-based) for timestamp lookup
-                        sel_idx0 = max(self.min_index, min(self.max_index, int(slider_val) - 1))
-                        ts_for_slider = self.timestamps[sel_idx0]
-                        st.write(f"**Selected:** {ts_for_slider.strftime('%Y-%m-%d %H:%M:%S')}")
+                # Columns for sliders (right) and metrics (left)
+                col1, col2 = st.columns([1, 10])
+
+                # Render the time step slider first so we can reflect its value in metrics
+                with col2:
+                    # Slider is 1-based for UX, mapped to 0-based internally
+                    slider_val = st.slider(
+                        "Select time step",
+                        min_value=1,
+                        max_value=len(self.data),
+                        value=int(baseline_idx + 1),
+                        step=1,
+                        key=f"{slider_key}_{st.session_state[time_slider_ver_key]}",
+                    )
+                    
+                    sel_idx0 = max(self.min_index, min(self.max_index, int(slider_val) - 1))
+                    
                     # Immediately apply slider selection to current index so render reflects it now
                     if sel_idx0 != baseline_idx:
                         # Bump rainfall slider version so it will reset to new rainfall on rerun
@@ -372,6 +375,12 @@ class TimeSliderLive:
                         # Force a rerun to re-instantiate widgets with up-to-date defaults
                         st.rerun()
 
+                # Metrics reflect the current (possibly updated) index
+                with col1:
+                    current_for_metric = self._get_current_index()
+                    progress_pct = (current_for_metric / max(1, len(self.data) - 1)) * 100
+                    st.metric("Progress", f"{progress_pct:.1f}%")
+
                 # Optional rainfall event selector (only when paused)
                 # Placed directly under the time step slider
                 rain_col_name = None
@@ -379,74 +388,80 @@ class TimeSliderLive:
                     rain_col_name = _RAIN_COL
 
                 if rain_col_name is not None:
-                    rain_series = pd.to_numeric(self.data[rain_col_name], errors="coerce")
-                    if not rain_series.dropna().empty:
-                        rmin = float(rain_series.min(skipna=True))
-                        rmax = float(rain_series.max(skipna=True))
-                        # Reasonable defaults
-                        default_r = float(rain_series.iloc[baseline_idx]) if pd.notna(rain_series.iloc[baseline_idx]) else float(max(rmin, 0.0))
-                        # Slider and tolerance controls
-                        rs_col, tol_col = st.columns([4, 1])
+                    # Build rainfall selector first, then show its metric for perfect sync
+                    with col2:
+                        rain_series = pd.to_numeric(self.data[rain_col_name], errors="coerce")
+                        if not rain_series.dropna().empty:
+                            rmin = float(rain_series.min(skipna=True))
+                            rmax = float(rain_series.max(skipna=True))
+                            # Reasonable defaults
+                            default_r = float(rain_series.iloc[baseline_idx]) if pd.notna(rain_series.iloc[baseline_idx]) else float(max(rmin, 0.0))
+                            # Slider and tolerance controls
+                            rs_col, tol_col = st.columns([4, 1])
 
-                        with rs_col:
-                            rain_sel = st.slider(
-                                "Select rainfall",
-                                min_value=rmin,
-                                max_value=rmax,
-                                value=min(max(default_r, rmin), rmax),
-                                step=max((rmax - rmin) / 100.0, 0.001),
-                                key=f"{rain_slider_base_key}_{st.session_state[rain_slider_ver_key]}",
-                            )
-                        with tol_col:
-                            tol = st.number_input(
-                                "Tolerance",
-                                min_value=0.0,
-                                value=0.1,
-                                step=0.05,
-                                key=rain_tol_key,
-                                help="Allowed difference between rainfall and selected value",
-                            )
+                            with rs_col:
+                                rain_sel = st.slider(
+                                    "Select rainfall",
+                                    min_value=rmin,
+                                    max_value=rmax,
+                                    value=min(max(default_r, rmin), rmax),
+                                    step=max((rmax - rmin) / 100.0, 0.001),
+                                    key=f"{rain_slider_base_key}_{st.session_state[rain_slider_ver_key]}",
+                                )
+                            with tol_col:
+                                tol = st.number_input(
+                                    "Tolerance",
+                                    min_value=0.0,
+                                    value=0.1,
+                                    step=0.05,
+                                    key=rain_tol_key,
+                                    help="Allowed difference between rainfall and selected value",
+                                )
 
-                        # Only perform a jump once per (value, tolerance, anchor_idx)
-                        anchor_sig = f"{rain_sel:.6f}|{tol:.6f}|{baseline_idx}"
-                        if st.session_state.get(rain_suppress_key):
-                            # Skip search once when we've just synced the rainfall slider programmatically
-                            st.session_state[rain_suppress_key] = False
-                            st.session_state[rain_last_key] = anchor_sig
-                        elif st.session_state.get(rain_last_key) != anchor_sig:
-                            # Search forward first
-                            found_idx = None
-                            for pos in range(baseline_idx + 1, self.max_index + 1):
-                                v = rain_series.iloc[pos]
-                                if pd.notna(v) and abs(float(v) - float(rain_sel)) <= float(tol):
-                                    found_idx = pos
-                                    break
-                            wrapped = False
-                            if found_idx is None:
-                                # Wrap-around search from start to current
-                                for pos in range(self.min_index, baseline_idx + 1):
+                            # Now show the selected rainfall metric in the left column
+                            with col1:
+                                st.metric("Rainfall (mm)", f"{rain_sel:.2f}")
+
+                            # Only perform a jump once per (value, tolerance, anchor_idx)
+                            anchor_sig = f"{rain_sel:.6f}|{tol:.6f}|{baseline_idx}"
+                            if st.session_state.get(rain_suppress_key):
+                                # Skip search once when we've just synced the rainfall slider programmatically
+                                st.session_state[rain_suppress_key] = False
+                                st.session_state[rain_last_key] = anchor_sig
+                            elif st.session_state.get(rain_last_key) != anchor_sig:
+                                # Search forward first
+                                found_idx = None
+                                for pos in range(baseline_idx + 1, self.max_index + 1):
                                     v = rain_series.iloc[pos]
                                     if pd.notna(v) and abs(float(v) - float(rain_sel)) <= float(tol):
                                         found_idx = pos
-                                        wrapped = True
                                         break
+                                wrapped = False
+                                if found_idx is None:
+                                    # Wrap-around search from start to current
+                                    for pos in range(self.min_index, baseline_idx + 1):
+                                        v = rain_series.iloc[pos]
+                                        if pd.notna(v) and abs(float(v) - float(rain_sel)) <= float(tol):
+                                            found_idx = pos
+                                            wrapped = True
+                                            break
 
-                            if found_idx is not None:
-                                self._set_current_index(found_idx)
-                                baseline_idx = found_idx
-                                # After jumping, bump version so the rainfall slider value resets; then rerun
-                                st.session_state[rain_slider_ver_key] = st.session_state.get(rain_slider_ver_key, 0) + 1
-                                st.session_state[rain_suppress_key] = True
+                                if found_idx is not None:
+                                    self._set_current_index(found_idx)
+                                    baseline_idx = found_idx
+                                    # After jumping, bump version so the rainfall slider value resets; then rerun
+                                    st.session_state[rain_slider_ver_key] = st.session_state.get(rain_slider_ver_key, 0) + 1
+                                    st.session_state[rain_suppress_key] = True
+                                    st.session_state[rain_last_key] = anchor_sig
+                                    st.rerun()
+                                    if wrapped:
+                                        st.warning("Wrapped to start of dataset to find next matching rainfall.")
+                                else:
+                                    st.warning("No time step with rainfall within tolerance found in entire dataset.")
+
                                 st.session_state[rain_last_key] = anchor_sig
-                                st.rerun()
-                                if wrapped:
-                                    st.warning("Wrapped to start of dataset to find next matching rainfall.")
-                            else:
-                                st.warning("No time step with rainfall within tolerance found in entire dataset.")
-
-                            st.session_state[rain_last_key] = anchor_sig
-                    else:
-                        st.info("No valid rainfall data available for event selection.")
+                        else:
+                            st.info("No valid rainfall data available for event selection.")
                 else:
                     # Uncomment if you'd like to inform about missing config or column
                     # st.info("Rainfall event selector unavailable: rainfall column not configured or missing.")
@@ -458,15 +473,6 @@ class TimeSliderLive:
                 # Fetch current data AFTER applying slider selection
                 current_idx, current_timestamp, current_data = self.get_current_data()
 
-                if show_progress:
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.write(f"**Index:** {current_idx + 1} / {len(self.data)}")
-                    with col2:
-                        st.write(f"**Time:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
-                    with col3:
-                        st.write(f"**Status:** ⏸️ Paused ({effective_speed}x)")
-
                 # Render main content once (with up-to-date selection)
                 try:
                     content_renderer(current_idx, current_timestamp, current_data, 0)
@@ -477,19 +483,24 @@ class TimeSliderLive:
         # Main update loop (playing): progress bar only, no interactive widgets here
         for iteration in range(max_iterations):
             effective_speed = st.session_state[f"{self.session_key}_speed_multiplier"]
+
+            # If playing state flipped to paused externally (e.g., hit end last iteration),
+            # immediately rerun to render paused UI (with sliders) instead of progress bar.
+            if not self._is_playing():
+                st.rerun()
+                return
+
             with placeholder.container():
                 current_idx, current_timestamp, current_data = self.get_current_data()
 
-                if show_progress:
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.write(f"**Index:** {current_idx + 1} / {len(self.data)}")
-                    with col2:
-                        st.write(f"**Time:** {current_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
-                    with col3:
-                        st.write(f"**Status:** ▶️ Playing ({effective_speed}x)")
-
-                    progress = current_idx / max(1, self.max_index)
+                col1, col2 = st.columns([1, 10])
+                progress = current_idx / max(1, self.max_index)
+                
+                with col1:
+                    st.metric("Progress", f"{progress*100:.1f}%")
+                with col2:
+                    st.write("")
+                    st.write("")
                     st.progress(progress)
 
                 try:
@@ -505,9 +516,15 @@ class TimeSliderLive:
                         steps_to_advance = self._calculate_time_step(effective_speed, updates_per_second)
                         if steps_to_advance > 0:
                             self._step_forward(steps_to_advance)
+                            # If we hit the end inside _step_forward, state flips to paused.
+                            # Rerun immediately so the paused UI (with sliders) appears.
+                            if not self._is_playing():
+                                st.rerun()
+                                return
                 else:
-                    # If user paused during loop, exit to render paused view on next run
-                    break
+                    # If user paused during loop, rerun to render paused view immediately
+                    st.rerun()
+                    return
 
             time.sleep(sleep_time)
 

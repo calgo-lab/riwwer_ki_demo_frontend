@@ -322,7 +322,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     st.subheader("📊 Current Data Point")
 
     # Metrics in columns
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Date", timestamp.strftime("%Y-%m-%d"))
     with col2:
@@ -339,10 +339,6 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 st.metric("Rainfall (mm)", "-")
         except Exception:
             st.metric("Rainfall (mm)", "-")
-    with col5:
-        # Calculate progress percentage
-        progress_pct = (idx / max(1, len(vierlinden_data) - 1)) * 100
-        st.metric("Progress", f"{progress_pct:.1f}%")
 
     # Main content area: Split into three columns for better layout
     st.subheader("🗺️ Live Sensor States, Model Forecasts and Rainfall")
@@ -698,9 +694,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
 # Run the smooth live dashboard using TimeSliderLive
 time_slider.run_live_dashboard(
     content_renderer=smooth_content_renderer,
-    hours_per_second=1.0,  # This will be controlled by the TimeSliderLive speed controls
     updates_per_second=4.0,  # Smooth update rate
     show_controls=True,
-    show_progress=True,
-    max_iterations=2000,
+    max_iterations=2000
 )
