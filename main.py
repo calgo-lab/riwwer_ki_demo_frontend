@@ -324,22 +324,21 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     # Metrics in columns
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Index", f"{idx + 1:,} / {len(vierlinden_data):,}")
+        st.metric("Date", timestamp.strftime("%Y-%m-%d"))
     with col2:
-        st.metric("Datetime", timestamp.strftime("%Y-%m-%d"))
-        st.caption(timestamp.strftime("%H:%M:%S"))
+        st.metric("Time", f"{timestamp.strftime('%H:%M:%S')}")
     with col3:
         current_value = data_row[TARGET_COLUMN]
-        st.metric(TARGET_COLUMN, f"{current_value:.2f}")
+        st.metric("Filling level - Overflow Basin", f"{current_value:.2f}")
     with col4:
         # Rainfall value (if available)
         try:
             if RAINFALL_COLUMN in data_row.index and pd.notna(data_row[RAINFALL_COLUMN]):
-                st.metric(RAINFALL_COLUMN, f"{float(data_row[RAINFALL_COLUMN]):.2f}")
+                st.metric("Rainfall (mm)", f"{float(data_row[RAINFALL_COLUMN]):.2f}")
             else:
-                st.metric(RAINFALL_COLUMN, "-")
+                st.metric("Rainfall (mm)", "-")
         except Exception:
-            st.metric("Rainfall", "-")
+            st.metric("Rainfall (mm)", "-")
     with col5:
         # Calculate progress percentage
         progress_pct = (idx / max(1, len(vierlinden_data) - 1)) * 100
