@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
 from typing import Optional
+from bokeh.plotting import figure
+from bokeh.models import HoverTool, Span, Range1d, ColumnDataSource
+from bokeh.layouts import column as bokeh_column
 
 
 class RainfallBarChart:
@@ -59,6 +61,10 @@ class RainfallBarChart:
         window_start = current_ts - pd.Timedelta(hours=int(history_hours))
         window_end = current_ts + pd.Timedelta(hours=int(future_hours))
 
+        # Fixed x-axis range: exactly [-72h, +12h] around current time
+        x_start_fixed = (current_ts - pd.Timedelta(hours=72))
+        x_end_fixed = (current_ts + pd.Timedelta(hours=12))
+
         data_start = data.index.min()
         actual_window_start = max(window_start, data_start)
 
@@ -95,75 +101,167 @@ class RainfallBarChart:
             if y_max <= y_min:
                 y_max = y_min + 1.0
 
-        # Build tidy dataframe for Altair
-        tidy = pd.DataFrame({
-            "datetime": window_df.index,
-            "actual": actual_vals.values,
-            "forecast": fcst_vals.values,
+        # Theme-aware styling
+        try:
+            current_theme = st.context.theme.type
+        except Exception:
+            current_theme = 'light'
+        is_dark = (current_theme == 'dark')
+
+        # Match SimulationChart theme colors
+        bg_color = '#0e1117' if is_dark else 'white'
+        grid_color = '#2c2f36' if is_dark else 'lightgray'
+        axis_color = '#e0e0e0' if is_dark else '#000000'
+        text_color = '#e0e0e0' if is_dark else '#000000'
+
+        # Determine bar width from median interval (fallback 1h)
+        idx = window_df.index.sort_values()
+        if len(idx) >= 2:
+            diffs = pd.Series(idx[1:]).reset_index(drop=True) - pd.Series(idx[:-1]).reset_index(drop=True)
+            try:
+                median_delta = pd.to_timedelta(pd.Series(diffs).dt.total_seconds().median(), unit='s')
+            except Exception:
+                median_delta = pd.Timedelta(hours=1)
+        else:
+            median_delta = pd.Timedelta(hours=1)
+        bar_width_ms = max(1, int(median_delta.total_seconds() * 1000 * 0.8))
+
+        # Shared y-range
+        y_range = Range1d(start=y_min, end=y_max)
+
+        def make_common_figure(fig_height: int, title: Optional[str] = None):
+            p = figure(
+                x_axis_type='datetime',
+                height=int(fig_height),
+                toolbar_location='above',
+                x_range=(x_start_fixed.to_pydatetime(), x_end_fixed.to_pydatetime()),
+                y_range=y_range,
+                title=title,
+            )
+            p.sizing_mode = 'stretch_width'
+            p.background_fill_color = bg_color
+            p.border_fill_color = bg_color
+            p.outline_line_color = grid_color
+            p.xgrid.grid_line_color = grid_color
+            p.ygrid.grid_line_color = grid_color
+            p.xaxis.axis_label = 'Date'
+            p.yaxis.axis_label = 'Rainfall (mm)'
+            p.xaxis.major_label_text_color = axis_color
+            p.yaxis.major_label_text_color = axis_color
+            p.xaxis.axis_label_text_color = axis_color
+            p.yaxis.axis_label_text_color = axis_color
+            if p.title:
+                p.title.text_color = text_color
+            # Date tick formatter for consistency
+            try:
+                from bokeh.models import DatetimeTickFormatter
+                p.xaxis.formatter = DatetimeTickFormatter(minutes="%Y-%m-%d %H:%M", hours="%Y-%m-%d %H:%M", days="%Y-%m-%d")
+            except Exception:
+                pass
+            # Font sizes consistent with SimulationChart
+            try:
+                if p.title:
+                    p.title.text_font_size = '14pt'
+                p.xaxis.major_label_text_font_size = '12pt'
+                p.yaxis.major_label_text_font_size = '12pt'
+                p.xaxis.axis_label_text_font_size = '13pt'
+                p.yaxis.axis_label_text_font_size = '13pt'
+            except Exception:
+                pass
+            p.grid.grid_line_alpha = 0.3
+            p.xgrid.minor_grid_line_color = None
+            p.ygrid.minor_grid_line_color = None
+            return p
+
+        # Data sources (filter value >= 0 and not NaN)
+        actual_mask = actual_vals.notna() & (pd.to_numeric(actual_vals, errors='coerce') >= 0)
+        fcst_mask = fcst_vals.notna() & (pd.to_numeric(fcst_vals, errors='coerce') >= 0)
+
+        actual_source = ColumnDataSource({
+            'x': window_df.index[actual_mask].to_pydatetime(),
+            'y': pd.to_numeric(actual_vals[actual_mask], errors='coerce').astype(float),
+            'series': ['actual'] * int(actual_mask.sum()),
+        })
+        forecast_source = ColumnDataSource({
+            'x': window_df.index[fcst_mask].to_pydatetime(),
+            'y': pd.to_numeric(fcst_vals[fcst_mask], errors='coerce').astype(float),
+            'series': ['forecast'] * int(fcst_mask.sum()),
         })
 
-        # Melt to long format with type column
-        plot_df = tidy.melt(id_vars=["datetime"], value_vars=["actual", "forecast"], var_name="type", value_name="value")
+        actual_color = '#1f77b4'
+        forecast_color = '#ff7f0e'
 
         # Build charts
         if separate_panels:
             per_height = max(160, int(height / 2))
 
-            # Actual panel
-            actual_df = pd.DataFrame({
-                'datetime': window_df.index,
-                'value': actual_vals.values
-            })
-            actual_base = alt.Chart(actual_df.dropna()).transform_filter(
-                alt.FieldGTPredicate(field='value', gt=0) | alt.FieldEqualPredicate(field='value', equal=0)
-            ).encode(
-                x=alt.X('datetime:T', scale=alt.Scale(domain=[actual_window_start, window_end]), title='Time'),
-                y=alt.Y('value:Q', scale=alt.Scale(domain=[y_min, y_max]), title='Rainfall (mm)')
-            )
-            actual_bar = actual_base.mark_bar(color='#1f77b4', opacity=0.9)
+            p_actual = make_common_figure(per_height, title='Actual rainfall')
+            p_forecast = make_common_figure(per_height, title='Forecast rainfall')
 
-            # Forecast panel
-            forecast_df = pd.DataFrame({
-                'datetime': window_df.index,
-                'value': fcst_vals.values
-            })
-            forecast_base = alt.Chart(forecast_df.dropna()).transform_filter(
-                alt.FieldGTPredicate(field='value', gt=0) | alt.FieldEqualPredicate(field='value', equal=0)
-            ).encode(
-                x=alt.X('datetime:T', scale=alt.Scale(domain=[actual_window_start, window_end]), title='Time'),
-                y=alt.Y('value:Q', scale=alt.Scale(domain=[y_min, y_max]), title='Rainfall (mm)')
-            )
-            forecast_bar = forecast_base.mark_bar(color='#ff7f0e', opacity=0.75)
+            # Bars
+            p_actual.vbar(x='x', top='y', width=bar_width_ms, source=actual_source, fill_color=actual_color, line_color=actual_color, fill_alpha=0.9)
+            p_forecast.vbar(x='x', top='y', width=bar_width_ms, source=forecast_source, fill_color=forecast_color, line_color=forecast_color, fill_alpha=0.75)
 
-            # Current time rules
-            current_line_df = pd.DataFrame({'x': [current_ts], 'y': [y_min]})
-            current_rule_actual = alt.Chart(current_line_df).mark_rule(color='red', strokeWidth=2, opacity=0.7).encode(x='x:T')
-            current_rule_forecast = alt.Chart(current_line_df).mark_rule(color='red', strokeWidth=2, opacity=0.7).encode(x='x:T')
+            # Current time vertical line
+            curr_span_actual = Span(location=current_ts.timestamp() * 1000, dimension='height', line_color='red', line_dash='dashed', line_width=3, line_alpha=1.0)
+            curr_span_forecast = Span(location=current_ts.timestamp() * 1000, dimension='height', line_color='red', line_dash='dashed', line_width=3, line_alpha=1.0)
+            p_actual.add_layout(curr_span_actual)
+            p_forecast.add_layout(curr_span_forecast)
 
-            actual_chart = (actual_bar + current_rule_actual).properties(title='Actual rainfall', height=per_height)
-            forecast_chart = (forecast_bar + current_rule_forecast).properties(title='Forecast rainfall', height=per_height)
+            # Hover tools
+            hover_a = HoverTool(tooltips=[
+                ('Time', '@x{%F %T}'),
+                ('Value (mm)', '@y{0.00}')
+            ], formatters={'@x': 'datetime'}, mode='vline')
+            hover_f = HoverTool(tooltips=[
+                ('Time', '@x{%F %T}'),
+                ('Value (mm)', '@y{0.00}')
+            ], formatters={'@x': 'datetime'}, mode='vline')
+            p_actual.add_tools(hover_a)
+            p_forecast.add_tools(hover_f)
 
-            chart = alt.vconcat(actual_chart, forecast_chart).resolve_scale(y='shared')
+            layout = bokeh_column(p_actual, p_forecast)
         else:
-            # Overlay with legend
-            base = alt.Chart(plot_df).transform_filter(
-                alt.FieldGTPredicate(field="value", gt=0) | alt.FieldEqualPredicate(field="value", equal=0)
-            ).encode(
-                x=alt.X('datetime:T', scale=alt.Scale(domain=[actual_window_start, window_end]), title='Time'),
-                y=alt.Y('value:Q', scale=alt.Scale(domain=[y_min, y_max]), title='Rainfall (mm)'),
-                color=alt.Color('type:N', scale=alt.Scale(domain=['actual','forecast'], range=['#1f77b4','#ff7f0e']), title='Series'),
-                tooltip=[
-                    alt.Tooltip('datetime:T', title='Time'),
-                    alt.Tooltip('type:N', title='Series'),
-                    alt.Tooltip('value:Q', title='Value (mm)', format='.2f')
-                ]
-            )
-            bars = base.mark_bar(opacity=0.8)
+            p = make_common_figure(height)
 
-            current_line_data = pd.DataFrame({'x': [current_ts, current_ts], 'y': [y_min, y_max]})
-            current_line = alt.Chart(current_line_data).mark_rule(color='red', strokeWidth=2, opacity=0.7).encode(x='x:T')
-            chart = (bars + current_line).properties(height=height)
+            # Bars for both series
+            r_actual = p.vbar(x='x', top='y', width=bar_width_ms, source=actual_source, fill_color=actual_color, line_color=actual_color, fill_alpha=0.9, legend_label='actual')
+            r_forecast = p.vbar(x='x', top='y', width=bar_width_ms, source=forecast_source, fill_color=forecast_color, line_color=forecast_color, fill_alpha=0.75, legend_label='forecast')
+
+            # Current time vertical line
+            curr_span = Span(location=current_ts.timestamp() * 1000, dimension='height', line_color='red', line_dash='dashed', line_width=3, line_alpha=1.0)
+            p.add_layout(curr_span)
+
+            # Hover tool
+            hover = HoverTool(tooltips=[
+                ('Time', '@x{%F %T}'),
+                ('Series', '@series'),
+                ('Value (mm)', '@y{0.00}')
+            ], formatters={'@x': 'datetime'}, mode='vline', renderers=[r_actual, r_forecast])
+            p.add_tools(hover)
+
+            # Legend below chart, horizontal, consistent font
+            try:
+                from bokeh.models import Legend, LegendItem
+                p.legend.visible = False
+                items = [
+                    LegendItem(label='Actual', renderers=[r_actual]),
+                    LegendItem(label='Forecast', renderers=[r_forecast]),
+                ]
+                legend = Legend(items=items, orientation='horizontal')
+                legend.click_policy = 'hide'
+                legend.label_text_color = text_color
+                legend.label_text_font_size = '13pt'
+                legend.spacing = 12
+                legend.background_fill_alpha = 0.0
+                p.add_layout(legend, 'below')
+            except Exception:
+                p.legend.label_text_color = text_color
+                p.legend.background_fill_alpha = 0.0
+                p.legend.click_policy = 'hide'
+
+            layout = p
 
         container = st.container()
         with container:
-            st.altair_chart(chart, use_container_width=True, theme=None)
+            st.bokeh_chart(layout, use_container_width=True)
