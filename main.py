@@ -148,22 +148,11 @@ with st.expander("⚙️ Dashboard Configuration", expanded=False):
             help="Choose which global model's predictions to visualize (12-step ahead)."
         )
 
-    # Chart renderer selection
-    renderer_choice = st.radio(
-        "Chart renderer",
-        options=["Bokeh", "Matplotlib"],
-        index=0,
-        horizontal=True,
-        key="chart_renderer_selector",
-        help="Bokeh for smooth interactive, Matplotlib for lightweight static."
-    )
-
 # Initialize components using the smooth TimeSliderLive approach
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
 simulation_chart = SimulationChart(
     key="pydeck_simulation_chart",
-    interactive=True,
-    renderer=("bokeh" if renderer_choice == "Bokeh" else "matplotlib"),
+    interactive=True
 )
 rainfall_chart = RainfallBarChart(key="pydeck_rainfall_chart")
 
@@ -338,26 +327,26 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
     """Content renderer for smooth updates using the TimeSliderLive pattern"""
 
     # Current data display at the top
-    st.subheader("📊 Current Data Point")
-
-    # Metrics in columns
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Date", timestamp.strftime("%Y-%m-%d"))
-    with col2:
-        st.metric("Time", f"{timestamp.strftime('%H:%M:%S')}")
-    with col3:
-        current_value = data_row[TARGET_COLUMN]
-        st.metric("Filling level - Overflow Basin", f"{current_value:.2f}")
-    with col4:
-        # Rainfall value (if available)
-        try:
-            if RAINFALL_COLUMN in data_row.index and pd.notna(data_row[RAINFALL_COLUMN]):
-                st.metric("Rainfall (mm)", f"{float(data_row[RAINFALL_COLUMN]):.2f}")
-            else:
+    with st.container(border=True):
+        st.markdown("<div class='panel-header'>📊 Current Data Point</div>", unsafe_allow_html=True)
+        # Metrics in columns
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Date", timestamp.strftime("%Y-%m-%d"))
+        with col2:
+            st.metric("Time", f"{timestamp.strftime('%H:%M:%S')}")
+        with col3:
+            current_value = data_row[TARGET_COLUMN]
+            st.metric("Filling level - Overflow Basin", f"{current_value:.2f}")
+        with col4:
+            # Rainfall value (if available)
+            try:
+                if RAINFALL_COLUMN in data_row.index and pd.notna(data_row[RAINFALL_COLUMN]):
+                    st.metric("Rainfall (mm)", f"{float(data_row[RAINFALL_COLUMN]):.2f}")
+                else:
+                    st.metric("Rainfall (mm)", "-")
+            except Exception:
                 st.metric("Rainfall (mm)", "-")
-        except Exception:
-            st.metric("Rainfall (mm)", "-")
 
     # Main content area: panels (equal widths)
     left_panel_col, right_panel_col = st.columns([1,2], gap="small")
