@@ -25,14 +25,80 @@ from utils.config import (
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
 from components import TimeSliderLive, SimulationChart, RainfallBarChart, OverflowRiskometer
+from PIL import Image
+
+icon = Image.open("figures/icon.png")
 
 st.set_page_config(
-    page_title="RIWWER KI Demo",
-    page_icon="⚡",
+    page_title="RIWWER ML Demo",
+    page_icon=icon,
     layout="wide",
 )
 
-st.title("RIWWER KI Demo")
+st.title("Demonstration of Forecasting Models for Urban Wastewater Management")
+
+# Logos row (uniform height, concatenated with fixed spacing)
+try:
+    from pathlib import Path
+    import base64
+
+    def _b64_img(path: str) -> str:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+
+    logos = [
+        "figures/riwwer-logo.png",
+        "figures/bht-logo.png",
+        "figures/calgolab-logo.png",
+        "figures/okeanos-logo.png",
+        "figures/ude-logo.png",
+    ]
+    logo_files = [p for p in logos if os.path.exists(p)]
+
+    if logo_files:
+        logo_h = 100  # px fixed height
+        gap_px = 24   # fixed horizontal spacing
+        # CSS for a single-row centered flex layout with fixed gaps
+        st.markdown(
+            f"""
+            <style>
+            .logo-row {{
+                display: flex;
+                align-items: center;
+                justify-content: left;
+                gap: {gap_px}px;
+                flex-wrap: nowrap;
+                margin-bottom: 8px;
+            }}
+            .logo-row img {{
+                height: {logo_h}px;
+                object-fit: contain;
+                display: inline-block;
+            }}
+            @media (max-width: 900px) {{
+                .logo-row {{ flex-wrap: wrap; gap: 16px; }}
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Build the row of images
+        imgs_html = []
+        for path in logo_files:
+            try:
+                b64 = _b64_img(path)
+                imgs_html.append(
+                    f"<img src='data:image/png;base64,{b64}' alt='{os.path.basename(path)}' />"
+                )
+            except Exception:
+                imgs_html.append(
+                    f"<img src='{path}' alt='{os.path.basename(path)}' />"
+                )
+
+        st.markdown("<div class='logo-row'>" + "".join(imgs_html) + "</div>", unsafe_allow_html=True)
+except Exception:
+    pass
 
 # Styles for bordered panels with a blue title bar
 st.markdown(
@@ -96,57 +162,52 @@ overflow_cls_predictions = _load_overflow_cls_predictions()
 # Calculate fixed y-axis bounds for consistent chart scaling
 y_axis_bounds = calculate_target_column_bounds(vierlinden_data)
 
-# # Show data overview
-# with st.expander("📊 Data Overview", expanded=False):
-#     col1, col2, col3, col4 = st.columns(4)
-#     with col1:
-#         st.metric("Total Records", len(vierlinden_data))
-#     with col2:
-#         st.metric(
-#             "Date Range", f"{vierlinden_data.index.min().strftime('%Y-%m-%d')}"
-#         )
-#         st.caption(f"to {vierlinden_data.index.max().strftime('%Y-%m-%d')}")
-#     with col3:
-#         st.metric("Target Column", TARGET_COLUMN)
-#     with col4:
-#         st.metric("Y-Axis Range", f"[{y_axis_bounds[0]:.1f}, {y_axis_bounds[1]:.1f}]")
-#         st.caption("Fixed bounds (±0.5 rounded)")
+def render_dashboard_config_panel():
+    with st.container(border=True):
+        st.markdown("<div class='panel-header'>⚙️ Dashboard Configuration</div>", unsafe_allow_html=True)
+        with st.expander("ℹ️ What does this mean?", expanded=False):
+            st.markdown(
+                """
+                Select between Standard Operation and Full Network Outage scenarios:
+                - **Standard Operation:** During standard operation, sensor data from all available sources will be sent to the central server for predictions.
+                - **Full Network Outage:** Treats all external sensor information as inactive and uses only the local measurements for the forecasts.
 
-# Configuration options (now expandable)
-with st.expander("⚙️ Dashboard Configuration", expanded=False):
-    # Model scope selector
-    model_scope = st.radio(
-        "Model scope",
-        options=["Standard operation", "Full network outage"],
-        index=0,
-        horizontal=True,
-        key="model_scope_selector",
-        help="Standard operation: Uses all available sensor information within the network. Full network outage: Treats all external sensor information as inactive and use only local measurements for the forecasts."
-    )
-    is_local_mode = (model_scope == "Full network outage")
-    is_global_mode = (model_scope == "Standard operation")
-
-    # Local model selector (only visible in Local mode)
-    local_model_choice = None
-    global_model_choice = None
-    if is_local_mode:
-        local_model_choice = st.radio(
-            "Local model",
-            options=["LSTM", "Transformer"],
+                *Standard Operation* is a Cloud solution, while during *Full Network Outage* the edge solution with lightweight models will be used.
+                """
+            )
+        # Model scope selector
+        st.radio(
+            "Model scope",
+            options=["Standard operation", "Full network outage"],
             index=0,
             horizontal=True,
-            key="local_model_selector",
-            help="Choose which local model's predictions to visualize."
+            key="model_scope_selector",
+            help=(
+                "Standard operation: Uses all available sensor information within the network. "
+                "Full network outage: Treats all external sensor information as inactive and use only local measurements for the forecasts."
+            ),
         )
-    elif is_global_mode:
-        global_model_choice = st.radio(
-            "Global model",
-            options=["TFT", "LSTM"],
-            index=0,
-            horizontal=True,
-            key="global_model_selector",
-            help="Choose which global model's predictions to visualize (12-step ahead)."
-        )
+        is_local = st.session_state.get("model_scope_selector", "Standard operation") == "Full network outage"
+        is_global = not is_local
+        # Local model selector (only visible in Local mode)
+        if is_local:
+            st.radio(
+                "Local model",
+                options=["LSTM", "Transformer"],
+                index=0,
+                horizontal=True,
+                key="local_model_selector",
+                help="Choose which local model's predictions to visualize.",
+            )
+        elif is_global:
+            st.radio(
+                "Global model",
+                options=["TFT", "LSTM"],
+                index=0,
+                horizontal=True,
+                key="global_model_selector",
+                help="Choose which global model's predictions to visualize (12-step ahead).",
+            )
 
 # Initialize components using the smooth TimeSliderLive approach
 time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
@@ -325,6 +386,13 @@ def prepare_map_data(data_row, timestamp, model_scope: str):
 
 def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Series, iteration: int):
     """Content renderer for smooth updates using the TimeSliderLive pattern"""
+
+    # Read configuration from session_state
+    model_scope = st.session_state.get("model_scope_selector", "Standard operation")
+    is_local_mode = (model_scope == "Full network outage")
+    is_global_mode = not is_local_mode
+    local_model_choice = st.session_state.get("local_model_selector", "LSTM")
+    global_model_choice = st.session_state.get("global_model_selector", "TFT")
 
     # Current data display at the top
     with st.container(border=True):
@@ -620,5 +688,6 @@ time_slider.run_live_dashboard(
     content_renderer=smooth_content_renderer,
     updates_per_second=4.0,  # Smooth update rate
     show_controls=True,
-    max_iterations=2000
+    max_iterations=2000,
+    left_of_nav_renderer=render_dashboard_config_panel
 )

@@ -279,7 +279,8 @@ class TimeSliderLive:
         content_renderer: Callable[[int, pd.Timestamp, pd.Series, int], None],
         updates_per_second: float = 2.0,
         show_controls: bool = True,
-        max_iterations: int = 1000
+        max_iterations: int = 1000,
+        left_of_nav_renderer: Optional[Callable[[], None]] = None,
     ) -> None:
         """
         Run the live dashboard with continuous updates.
@@ -293,15 +294,27 @@ class TimeSliderLive:
             max_iterations: Maximum number of iterations (safety limit)
         """
         # Create a single panel that contains controls and the dynamic timeline UI
-        panel = st.container(border=True)
-        with panel:
-            # Reuse global panel header style defined in main.py
-            st.markdown("<div class='panel-header'>⏱️ Time Navigation</div>", unsafe_allow_html=True)
-            # Static controls (render once per run to avoid duplicate widget keys)
-            if show_controls:
-                self.render_controls()
-            # Placeholder for dynamic nav UI (slider when paused, progress when playing)
-            nav_placeholder = st.empty()
+        # Create two sibling panels side-by-side: left (config) and right (time navigation)
+        left_col, right_col = st.columns([1.5, 6], gap="small")
+
+        # Left: external renderer builds its own bordered panel
+        with left_col:
+            if callable(left_of_nav_renderer):
+                try:
+                    left_of_nav_renderer()
+                except Exception:
+                    pass
+
+        # Right: our own bordered Time Navigation panel
+        with right_col:
+            nav_panel = st.container(border=True)
+            with nav_panel:
+                st.markdown("<div class='panel-header'>⏱️ Time Navigation</div>", unsafe_allow_html=True)
+                # Static controls (render once per run to avoid duplicate widget keys)
+                if show_controls:
+                    self.render_controls()
+                # Placeholder for dynamic nav UI (slider when paused, progress when playing)
+                nav_placeholder = st.empty()
 
         # Separate placeholder for the main content area (outside the nav panel)
         content_placeholder = st.empty()
@@ -471,7 +484,7 @@ class TimeSliderLive:
                                     if wrapped:
                                         st.warning("Wrapped to start of dataset to find next matching rainfall.")
                                 else:
-                                    st.warning("No time step with rainfall within tolerance found in entire dataset.")
+                                    st.warning("No time step with rainfall within tolerance found in entire dataset. *Please increase the tolerance* (see to the right of the slider).")
 
                                 st.session_state[rain_last_key] = anchor_sig
                         else:
