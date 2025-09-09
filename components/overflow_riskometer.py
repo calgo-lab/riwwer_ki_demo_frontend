@@ -69,7 +69,7 @@ class OverflowRiskometer:
                 # Show warning for local mode and exit early
                 if self.is_local_mode:
                     st.warning(
-                        "**Local mode is active. All locations are treated as inactive and sensor measurements are not considered..",
+                        "Local mode is active. Required **Rainfall Measurements** are not available.",
                         icon="⚠️"
                     )
                     return
