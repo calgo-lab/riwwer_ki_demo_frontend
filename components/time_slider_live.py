@@ -292,19 +292,32 @@ class TimeSliderLive:
             show_progress: Whether to show progress information
             max_iterations: Maximum number of iterations (safety limit)
         """
-        # Show controls at the top
-        if show_controls:
-            with st.expander("Time Navigation Controls", expanded=True):
+        # Create a single panel that contains controls and the dynamic timeline UI
+        panel = st.container(border=True)
+        with panel:
+            # Reuse global panel header style defined in main.py
+            st.markdown("<div class='panel-header'>⏱️ Time Navigation</div>", unsafe_allow_html=True)
+            # Static controls (render once per run to avoid duplicate widget keys)
+            if show_controls:
                 self.render_controls()
+            # Placeholder for dynamic nav UI (slider when paused, progress when playing)
+            nav_placeholder = st.empty()
 
-        # Create placeholder for the main content
-        placeholder = st.empty()
+        # Separate placeholder for the main content area (outside the nav panel)
+        content_placeholder = st.empty()
 
         # Hard wipe when switching modes (paused <-> playing) to avoid stacked/dimmed components
         mode_key = f"{self.session_key}_last_mode"
         current_mode = "playing" if self._is_playing() else "paused"
         if st.session_state.get(mode_key) != current_mode:
-            placeholder.empty()
+            try:
+                nav_placeholder.empty()
+            except Exception:
+                pass
+            try:
+                content_placeholder.empty()
+            except Exception:
+                pass
             st.session_state[mode_key] = current_mode
             st.rerun()
             return
@@ -315,7 +328,8 @@ class TimeSliderLive:
         # If paused, render a single snapshot with an interactive slider and return
         if not self._is_playing():
             effective_speed = st.session_state[f"{self.session_key}_speed_multiplier"]
-            with placeholder.container():
+            # 1) Navigation panel content (controls + sliders)
+            with nav_placeholder.container():
                 # Interactive slider while paused (render once per run)
                 baseline_idx = self._get_current_index()  # 0-based internal index
                 slider_key = f"{self.session_key}_idx_slider"
@@ -470,10 +484,9 @@ class TimeSliderLive:
                 # Update last_idx to the index we are rendering now (after any jumps)
                 st.session_state[last_idx_key] = baseline_idx
 
-                # Fetch current data AFTER applying slider selection
-                current_idx, current_timestamp, current_data = self.get_current_data()
-
-                # Render main content once (with up-to-date selection)
+            # 2) Render main content area separately (outside nav panel)
+            current_idx, current_timestamp, current_data = self.get_current_data()
+            with content_placeholder.container():
                 try:
                     content_renderer(current_idx, current_timestamp, current_data, 0)
                 except Exception as e:
@@ -490,12 +503,11 @@ class TimeSliderLive:
                 st.rerun()
                 return
 
-            with placeholder.container():
+            # 1) Navigation panel content while playing (controls + progress bar)
+            with nav_placeholder.container():
                 current_idx, current_timestamp, current_data = self.get_current_data()
-
                 col1, col2 = st.columns([1, 10])
                 progress = current_idx / max(1, self.max_index)
-                
                 with col1:
                     st.metric("Progress", f"{progress*100:.1f}%")
                 with col2:
@@ -503,6 +515,8 @@ class TimeSliderLive:
                     st.write("")
                     st.progress(progress)
 
+            # 2) Main content area (outside nav panel)
+            with content_placeholder.container():
                 try:
                     content_renderer(current_idx, current_timestamp, current_data, iteration)
                 except Exception as e:
