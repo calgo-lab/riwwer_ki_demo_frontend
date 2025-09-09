@@ -100,6 +100,26 @@ try:
 except Exception:
     pass
 
+# Short intro text (full-width, styled for readability)
+st.write("")
+st.markdown(
+    """
+    <div style="width:100%; box-sizing:border-box; padding:0 16px; font-size:19px; line-height:1.45; color:var(--dl-color, #111);">
+    <strong>Welcome to the RIWWER ML Demo!</strong> This application showcases the machine learning (ML) models for Urban Wastewater Management
+    developed by the Berliner Hochschule für Technik, Okeanos and the University of Duisburg-Essen. 
+    The models are applied to historical data from the combined sewer system of Vierlinden in Duisburg (<em>Wirtschaftsbetriebe Duisburg</em>).
+    We demonstrate the performance of ML models to forecast filling levels and estimate the risk of Combined Sewer Overflows in the year 2023.
+    The models were trained with data from the years of 2021 and 2022. For further information consult our GitHub repository: <a href="https://github.com/calgo-lab/resilient-timeseries-evaluation">resilient-timeseries-evaluation</a><br/>
+    <br/>
+    Start by navigating through time using the buttons and sliders in the <strong>Time Navigation Control</strong>. Alternatively you can also search for specific rain events using the <em>"Select rainfall"</em> slider.<br/>
+    <br/>
+    The project was funded by the Federal Ministry of Economic Affairs and Climate Action of Germany for the RIWWER project (01MD22007H, 01MD22007C).<br/>
+    <em>RIWWER: Reduction of the Impact of untreated WasteWater on the Environment in case of torrential Rain</em>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Styles for bordered panels with a blue title bar
 st.markdown(
     """
