@@ -8,6 +8,7 @@ import json
 try:
     from bokeh.plotting import figure
     from bokeh.models import Span, BoxAnnotation, Legend, LegendItem, DatetimeTickFormatter, HoverTool, ColumnDataSource, Label
+    from bokeh.layouts import column as bokeh_column
 except Exception:
     figure = None
 try:
@@ -83,7 +84,7 @@ class SimulationChart:
         ```
     """
     
-    def __init__(self, key: str, interactive: bool = False, *, renderer: str = "bokeh", mpl_fixed_height: bool = True):
+    def __init__(self, key: str, interactive: bool = False, *, renderer: str = "bokeh", mpl_fixed_height: bool = True, thresholds: tuple[float, float] = (3.0, 4.0)):
         """Initialize the SimulationChart component."""
         self.key = key
         self.interactive = interactive
@@ -91,6 +92,8 @@ class SimulationChart:
         # When using Matplotlib, keep a fixed pixel height (not responsive)
         # by default to avoid odd scaling when the container width changes.
         self.mpl_fixed_height = bool(mpl_fixed_height)
+        # Thresholds for traffic light color bar: (green_upper, yellow_upper). Red is >= yellow_upper.
+        self.thresholds = thresholds
         # Performance optimization: Cache frequently used values
         self._chart_cache = {}
         self._last_data_hash = None
@@ -218,6 +221,28 @@ class SimulationChart:
             
             if not st.checkbox(checkbox_label, key=checkbox_key):
                 return
+            
+        # Explanation panel similar to the riskometer
+        with st.expander("ℹ️ What does this mean?", expanded=False):
+            green_thr, yellow_thr = self.thresholds
+            st.markdown(
+                f"""
+                Forecasts for the filling levels of an overflow basin at the *Sewage Treatment Facility*.
+                **Line Plot**:
+                - **Historical line**: Shows measured filling levels up to the current time.
+                - **Forecast**: In Standard operation, an orange line shows the forecasts for the next 12 hours; in Full network outage, an orange dot shows the next hour.
+                - **True future line**: A light blue line indicates the true filling levels in the future. These are **NOT** yet observed.
+
+                **Traffic-light color bar (below the plot)**
+                - Helps to quickly assess risk periods across the timeline.
+                - Is aligned to the line plot and indicates risks for high filling levels.
+                - Uses historical filling levels for the history and present windows, and model forecasts for the future window.
+                - Colors by thresholds: 
+                    - **Green** if filling level prognosed to be within {green_thr:g}m
+                    - **Yellow** if filling level prognosed to be within {yellow_thr:g}m
+                    - **Red** if filling level prognosed to be above {yellow_thr:g}m.
+                """
+            )
         
         # OPTIMIZATION: Clear stale cache when data changes
         current_data_hash = self._get_data_hash(data)
@@ -245,39 +270,6 @@ class SimulationChart:
                 st.warning("Matplotlib not available.")
             else:
                 self._create_matplotlib_chart(
-                    data=data,
-                    current_timestamp=current_timestamp,
-                    current_value=current_value,
-                    target_column=target_column,
-                    title=title,
-                    height=height,
-                    iteration=iteration,
-                    y_axis_bounds=y_axis_bounds,
-                    is_local_mode_hint=is_local_mode,
-                    forecast_value=forecast_value,
-                    forecast_series=forecast_series
-                )
-        elif self.renderer == "uplot":
-            if st_html is None:
-                st.warning("Streamlit HTML components not available. Falling back to Altair.")
-                try:
-                    self._create_altair_chart(
-                        data=data,
-                        current_timestamp=current_timestamp,
-                        current_value=current_value,
-                        target_column=target_column,
-                        title=title,
-                        height=height,
-                        iteration=iteration,
-                        y_axis_bounds=y_axis_bounds,
-                        is_local_mode_hint=is_local_mode,
-                        forecast_value=forecast_value,
-                        forecast_series=forecast_series
-                    )
-                except ImportError:
-                    self._create_fallback_chart(data, target_column, height)
-            else:
-                self._create_uplot_chart(
                     data=data,
                     current_timestamp=current_timestamp,
                     current_value=current_value,
@@ -554,8 +546,97 @@ class SimulationChart:
         else:
             chart_key = f"{self.key}_bokeh_static"
 
-        # Streamlit's bokeh_chart does not support a key parameter
-        st.bokeh_chart(p, use_container_width=True)
+        # --- Traffic light color bar (aligned) ---
+        try:
+            color_bar_height = max(28, int(height * 0.08))  # small bar underneath
+            p_bar = figure(
+                x_axis_type='datetime',
+                height=color_bar_height,
+                sizing_mode='stretch_width',
+                toolbar_location=None,
+                tools=''
+            )
+            # Link ranges for perfect alignment
+            p_bar.x_range = p.x_range
+            p_bar.y_range.start = 0
+            p_bar.y_range.end = 1
+
+            # Theme styling
+            p_bar.background_fill_color = bg_color
+            p_bar.border_fill_color = bg_color
+            p_bar.outline_line_color = None
+            p_bar.xgrid.visible = False
+            p_bar.ygrid.visible = False
+            p_bar.xaxis.visible = False
+            p_bar.yaxis.visible = False
+            p_bar.min_border = 0
+
+            # Build blocks for entire visible window
+            green_thr, yellow_thr = self.thresholds
+            def level_to_color(v: float) -> str:
+                try:
+                    fv = float(v)
+                except Exception:
+                    return '#cccccc'
+                if fv < green_thr:
+                    return '#2ecc71'  # green
+                elif fv < yellow_thr:
+                    return '#f1c40f'  # yellow
+                else:
+                    return '#e74c3c'  # red
+
+            lefts: list = []
+            rights: list = []
+            colors: list = []
+
+            # 1) Historical + present window (use historical filling levels)
+            # Create hour-based segments from actual_window_start to current_ts
+            seg_left = actual_window_start
+            one_hour = pd.Timedelta(hours=1)
+            while seg_left < current_ts:
+                seg_right = min(seg_left + one_hour, current_ts)
+                # pick last known value at or before seg_right
+                if seg_right == current_ts and current_value is not None:
+                    v = float(current_value)
+                else:
+                    try:
+                        v_series = data.loc[:seg_right, target_column].dropna()
+                        v = float(v_series.iloc[-1]) if not v_series.empty else None
+                    except Exception:
+                        v = None
+                if v is not None:
+                    lefts.append(seg_left.to_pydatetime())
+                    rights.append(seg_right.to_pydatetime())
+                    colors.append(level_to_color(v))
+                seg_left = seg_right
+
+            # 2) Future window (use forecasted filling levels)
+            if forecast_series and len(forecast_series) > 0:
+                steps = min(12, len(forecast_series))
+                for i in range(steps):
+                    lefts.append((current_ts + pd.Timedelta(hours=i)).to_pydatetime())
+                    rights.append((current_ts + pd.Timedelta(hours=i+1)).to_pydatetime())
+                    colors.append(level_to_color(forecast_series[i]))
+            elif forecast_value is not None:
+                # Local one-step ahead
+                lefts.append(current_ts.to_pydatetime())
+                rights.append((current_ts + pd.Timedelta(hours=1)).to_pydatetime())
+                colors.append(level_to_color(forecast_value))
+
+            if lefts:
+                bar_src = ColumnDataSource(dict(left=lefts, right=rights, bottom=[0]*len(lefts), top=[1]*len(lefts), color=colors))
+                p_bar.quad(left='left', right='right', bottom='bottom', top='top', color='color', line_color=None, source=bar_src)
+
+            # Compose as a single Bokeh layout so spacing stays tight
+            if lefts:
+                layout = bokeh_column(p, p_bar, sizing_mode='stretch_width')
+                st.bokeh_chart(layout, use_container_width=True)
+            else:
+                # No segments computed; render main plot only to avoid warnings
+                st.bokeh_chart(p, use_container_width=True)
+        except Exception:
+            # Fallback: render just the main figure if the bar fails
+            st.bokeh_chart(p, use_container_width=True)
 
     def _create_matplotlib_chart(self,
                                  data: pd.DataFrame,
