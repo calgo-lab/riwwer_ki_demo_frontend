@@ -101,10 +101,17 @@ except Exception:
     pass
 
 # Short intro text (full-width, styled for readability)
-st.write("")
+# Pick text color depending on Streamlit theme (white on dark theme)
+# Theme-aware styling
+try:
+    current_theme = st.context.theme.type
+except Exception:
+    current_theme = 'light'
+is_dark = (current_theme == 'dark')
+_intro_text_color = "#ffffff" if is_dark else "#111111"
 st.markdown(
-    """
-    <div style="width:100%; box-sizing:border-box; padding:0 16px; font-size:19px; line-height:1.45; color:var(--dl-color, #111);">
+    f"""
+    <div style="width:100%; box-sizing:border-box; padding:0 16px; font-size:19px; line-height:1.45; color:{_intro_text_color};">
     <strong>Welcome to the RIWWER ML Demo!</strong> This application showcases the machine learning (ML) models for Urban Wastewater Management
     developed by the Berliner Hochschule für Technik, Okeanos and the University of Duisburg-Essen. 
     The models are applied to historical data from the combined sewer system of Vierlinden in Duisburg (<em>Wirtschaftsbetriebe Duisburg</em>).

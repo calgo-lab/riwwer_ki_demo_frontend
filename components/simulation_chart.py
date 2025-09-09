@@ -411,7 +411,7 @@ class SimulationChart:
             x_axis_type='datetime',
             height=height,
             sizing_mode='stretch_width',
-            title=title or f"{target_column} - Simulation View ({history_window_hours}h History + {12 if is_global_mode else 1}h Forecast)",
+            title=title or f"Filling Level Overflow Basin - Simulation View ({history_window_hours}h History + {12 if is_global_mode else 1}h Forecast)",
             toolbar_location='above',
             tools='pan,wheel_zoom,box_zoom,reset,save,hover'
         )
@@ -433,7 +433,7 @@ class SimulationChart:
         p.title.text_color = text_color
         # Axis labels
         p.xaxis.axis_label = 'Date'
-        p.yaxis.axis_label = target_column
+        p.yaxis.axis_label = 'Filling Level Overflow Basin'
 
         p.xaxis.formatter = DatetimeTickFormatter(minutes="%Y-%m-%d %H:%M", hours="%Y-%m-%d %H:%M", days="%Y-%m-%d")
 
