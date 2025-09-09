@@ -91,13 +91,10 @@ class OverflowRiskometer:
                     zone_color = "#F44336"  # Red
                     risk_level = "🔴"
 
-                # Create riskometer using Streamlit components
-                st.markdown("**Overflow Risk in the coming 2 hours at the Sewage Treatment Facility Location**")
-
                 # Add tooltip with explanation
                 with st.expander("ℹ️ What does this mean?", expanded=False):
                     st.markdown("""
-                    **Overflow Risk Assessment:**
+                    **Overflow Risk Assessment at the *Sewage Treatment Facility*:**
                     - **LOW RISK (0-33%)**: Minimal chance of overflow in the next 2 hours
                     - **MEDIUM RISK (33-67%)**: Moderate chance of overflow, monitoring recommended
                     - **HIGH RISK (67-100%)**: High chance of overflow, immediate attention required
