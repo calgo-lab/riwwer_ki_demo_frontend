@@ -20,43 +20,6 @@ try:
 except Exception:
     st_html = None
 
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def _prepare_window_data(data_hash: str, 
-                        window_start_ts: int, 
-                        current_ts_int: int,
-                        target_column: str) -> tuple[pd.DataFrame, bool]:
-    """
-    Cache expensive data filtering and preparation.
-    
-    Args:
-        data_hash: Hash of the data for cache invalidation
-        window_start_ts: Window start as timestamp integer
-        current_ts_int: Current timestamp as integer  
-        target_column: Name of the target column
-    
-    Returns:
-        tuple: (filtered_data, has_valid_data)
-    """
-    # This will be called with the actual data in the main method
-    # Placeholder for cache structure
-    return pd.DataFrame(), False
-
-
-@st.cache_data(ttl=600)  # Cache for 10 minutes
-def _calculate_chart_bounds(data_hash: str, 
-                          target_column: str, 
-                          y_axis_bounds: Optional[tuple[float, float]]) -> tuple[float, float, float]:
-    """
-    Cache expensive y-axis domain calculations.
-    
-    Returns:
-        tuple: (y_min, y_max, y_padding)
-    """
-    # This will be populated in the main method
-    return 0.0, 1.0, 0.1
-
-
 class SimulationChart:
     """
     A reusable simulation chart component for Streamlit apps.

@@ -11,6 +11,7 @@ from utils.config import (
     MAP_DATA,
     COORDINATES_DICT,
     SENSOR_GROUPS,
+    CACHE_TIME,
     calculate_target_column_bounds,
     RAINFALL_COLUMN,
     RAINFALL_FORECAST_COLUMN,
@@ -151,7 +152,7 @@ vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
 map_data = load_map_data() # Why not just use vierlinden_data directly?
 
 # Load local model predictions (one-step ahead)
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=CACHE_TIME)
 def _load_local_preds(path: str, time_col: str) -> pd.DataFrame | None:
     try:
         return pd.read_csv(path, parse_dates=[time_col], index_col=time_col)
@@ -161,7 +162,7 @@ def _load_local_preds(path: str, time_col: str) -> pd.DataFrame | None:
 local_preds = _load_local_preds(LOCAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLUMN)
 
 # Load global multi-step predictions (arrays of length 12 per timestamp)
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=CACHE_TIME)
 def _load_global_preds(path: str, time_col: str) -> pd.DataFrame | None:
     try:
         df = pd.read_csv(path, parse_dates=[time_col], index_col=time_col)
@@ -176,7 +177,7 @@ def _load_global_preds(path: str, time_col: str) -> pd.DataFrame | None:
 global_preds = _load_global_preds(GLOBAL_PREDICTIONS_PATH, PREDICTIONS_TIME_COLUMN)
 
 # Load overflow probability for riskometer predictions
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=CACHE_TIME)
 def _load_overflow_cls_predictions() -> pd.DataFrame | None:
     try:
         df = pd.read_csv(OVERFLOW_CLS_PRED_FILE_PATH, parse_dates=[PREDICTIONS_TIME_COLUMN],

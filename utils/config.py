@@ -76,8 +76,10 @@ MAP_DATA = pd.DataFrame(
 
 DATA_PATH = "data/vierlinden_21_22_23_all_with_forecast.csv"
 
+CACHE_TIME = 21600  # 6 hours
 
-@st.cache_data(ttl=900)
+
+@st.cache_data(ttl=CACHE_TIME)
 def read_data():
     data = pd.read_csv(
         DATA_PATH,
