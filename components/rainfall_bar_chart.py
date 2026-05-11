@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 from typing import Optional
+from math import floor, ceil, log10
 from bokeh.plotting import figure
-from bokeh.models import HoverTool, Span, Range1d, ColumnDataSource
+from bokeh.models import HoverTool, Span, Range1d, ColumnDataSource, Label, FixedTicker
 from bokeh.layouts import column as bokeh_column
 
 
@@ -126,8 +127,58 @@ class RainfallBarChart:
             median_delta = pd.Timedelta(hours=1)
         bar_width_ms = max(1, int(median_delta.total_seconds() * 1000 * 0.8))
 
-        # Shared y-range
-        y_range = Range1d(start=y_min, end=y_max)
+        # Build readable y-axis ticks using "nice" steps (1, 2, 2.5, 5 * 10^n)
+        # so decimal maxima don't lead to awkward labels.
+        def _compute_nice_axis_ticks(vmin: float, vmax: float) -> tuple[list[float], float, float]:
+            span = max(vmax - vmin, 1e-9)
+            target_steps = (4, 3)  # 5 or 4 major labels
+            bases = (1.0, 2.0, 2.5, 5.0)
+
+            best = None
+            for step_count in target_steps:
+                raw = span / step_count
+                exponent = int(floor(log10(raw))) if raw > 0 else 0
+
+                # Evaluate nearby exponents to find a clean step close to the target.
+                for exp in (exponent - 1, exponent, exponent + 1):
+                    for b in bases:
+                        step = b * (10 ** exp)
+                        if step <= 0:
+                            continue
+
+                        axis_start = max(0.0, floor(vmin / step) * step)
+                        axis_end = ceil(vmax / step) * step
+                        if axis_end <= axis_start:
+                            axis_end = axis_start + step
+
+                        tick_count = int(round((axis_end - axis_start) / step)) + 1
+                        if tick_count < 4 or tick_count > 5:
+                            continue
+
+                        # Prefer close-to-target steps with minimal extra headroom.
+                        score = abs(step - raw) + 0.15 * (axis_end - vmax)
+                        candidate = (score, step, axis_start, axis_end, tick_count)
+                        if best is None or candidate[0] < best[0]:
+                            best = candidate
+
+            # Fallback: guarantee at least 4 major labels.
+            if best is None:
+                step = span / 3.0
+                axis_start = max(0.0, vmin)
+                axis_end = vmax
+                ticks = [float(f"{(axis_start + i * step):.10g}") for i in range(4)]
+                ticks[-1] = float(f"{axis_end:.10g}")
+                return ticks, axis_start, axis_end
+
+            _, step, axis_start, axis_end, tick_count = best
+            ticks = [float(f"{(axis_start + i * step):.10g}") for i in range(tick_count)]
+            return ticks, axis_start, axis_end
+
+        y_ticks, y_axis_start, y_axis_end = _compute_nice_axis_ticks(y_min, y_max)
+
+        # Shared y-range (slightly expanded to the tick bounds for clean labeling)
+        y_range = Range1d(start=y_axis_start, end=y_axis_end)
+        y_max = y_axis_end
 
         def make_common_figure(fig_height: int, title: Optional[str] = None):
             p = figure(
@@ -146,6 +197,7 @@ class RainfallBarChart:
             p.ygrid.grid_line_color = grid_color
             p.xaxis.axis_label = 'Date'
             p.yaxis.axis_label = 'Rainfall (mm)'
+            p.yaxis.ticker = FixedTicker(ticks=y_ticks)
             p.xaxis.major_label_text_color = axis_color
             p.yaxis.major_label_text_color = axis_color
             p.xaxis.axis_label_text_color = axis_color
@@ -207,6 +259,18 @@ class RainfallBarChart:
             curr_span_forecast = Span(location=current_ts.timestamp() * 1000, dimension='height', line_color='red', line_dash='dashed', line_width=3, line_alpha=1.0)
             p_actual.add_layout(curr_span_actual)
             p_forecast.add_layout(curr_span_forecast)
+            
+            # Add "Now" labels
+            p_actual.add_layout(Label(x=current_ts.timestamp() * 1000,
+                                      y=y_max,
+                                      x_units='data', y_units='data',
+                                      text='Now', text_color='red', text_font_style='bold', text_font_size='12pt',
+                                      text_baseline='top', x_offset=6))
+            p_forecast.add_layout(Label(x=current_ts.timestamp() * 1000,
+                                        y=y_max,
+                                        x_units='data', y_units='data',
+                                        text='Now', text_color='red', text_font_style='bold', text_font_size='12pt',
+                                        text_baseline='top', x_offset=6))
 
             # Hover tools
             hover_a = HoverTool(tooltips=[
@@ -231,6 +295,13 @@ class RainfallBarChart:
             # Current time vertical line
             curr_span = Span(location=current_ts.timestamp() * 1000, dimension='height', line_color='red', line_dash='dashed', line_width=3, line_alpha=1.0)
             p.add_layout(curr_span)
+            
+            # Add "Now" label
+            p.add_layout(Label(x=current_ts.timestamp() * 1000,
+                               y=y_max,
+                               x_units='data', y_units='data',
+                               text='Now', text_color='red', text_font_style='bold', text_font_size='12pt',
+                               text_baseline='top', x_offset=6))
 
             # Hover tool
             hover = HoverTool(tooltips=[
