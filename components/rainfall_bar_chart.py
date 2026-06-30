@@ -33,7 +33,7 @@ class RainfallBarChart:
         height: int = 280,
         show_controls: bool = True,
         is_playing: bool = False,
-    separate_panels: bool = True,
+        separate_panels: bool = True,
     ) -> None:
         if data.empty or not isinstance(data.index, pd.DatetimeIndex):
             st.info("No data available for rainfall chart.")
@@ -56,8 +56,8 @@ class RainfallBarChart:
                     key=f"{self.key}_history_hours_ctrl",
                     help="Hours back from current time to show as history",
                 )
-        # Persist current selection/value
-        st.session_state[f"{self.key}_history_hours_value"] = int(history_hours)
+            # Persist current selection/value only when controls are shown
+            st.session_state[f"{self.key}_history_hours_value"] = int(history_hours)
 
         window_start = current_ts - pd.Timedelta(hours=int(history_hours))
         window_end = current_ts + pd.Timedelta(hours=int(future_hours))
@@ -284,7 +284,7 @@ class RainfallBarChart:
             p_actual.add_tools(hover_a)
             p_forecast.add_tools(hover_f)
 
-            layout = bokeh_column(p_actual, p_forecast)
+            layout = bokeh_column(p_actual, p_forecast, sizing_mode='stretch_width')
         else:
             p = make_common_figure(height)
 
@@ -333,6 +333,4 @@ class RainfallBarChart:
 
             layout = p
 
-        container = st.container()
-        with container:
-            st.bokeh_chart(layout, use_container_width=True)
+        st.bokeh_chart(layout, use_container_width=True)

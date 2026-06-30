@@ -25,8 +25,18 @@ from utils.config import (
     OVERFLOW_CLS_PRED_FILE_PATH
 )
 from utils.dynamic_map_data import build_dynamic_map_data_from_row, load_map_data
-from components import TimeSliderLive, SimulationChart, RainfallBarChart, OverflowRiskometer
+from components import SimulationChart, RainfallBarChart, OverflowRiskometer
 from PIL import Image
+
+# Min/Max Update intervals for auto-advance when playing
+MIN_UPDATE_INTERVAL = 0.2 # to low update interval could cause performance issues
+MAX_UPDATE_INTERVAL = 1.0
+
+# Check Streamlit version for fragment support
+STREAMLIT_VERSION = tuple(int(x) for x in st.__version__.split('.'))
+if STREAMLIT_VERSION < (1, 35, 0):
+    st.error(f"Streamlit {st.__version__} does not support fragments. Please upgrade to 1.35.0 or later.")
+    st.stop()
 
 icon = Image.open("figures/icon.png")
 
@@ -36,116 +46,236 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("Demonstration of Forecasting Models for Urban Wastewater Management")
+st.title("Forecasting Models for Urban Wastewater Management")
 
-# Logos row (uniform height, concatenated with fixed spacing)
-try:
-    from pathlib import Path
-    import base64
+# =============================================================================
+# STATIC UI FUNCTIONS (run once at startup)
+# =============================================================================
 
-    def _b64_img(path: str) -> str:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode("ascii")
+def render_static_header():
+    """Render static header elements (logos, intro, CSS). Runs once at startup."""
+    
+    # Logos row (uniform height, concatenated with fixed spacing)
+    try:
+        from pathlib import Path
+        import base64
 
-    logos = [
-        "figures/riwwer-logo.png",
-        "figures/bht-logo.png",
-        "figures/calgolab-logo.png",
-        "figures/okeanos-logo.png",
-        "figures/ude-logo.png",
-    ]
-    logo_files = [p for p in logos if os.path.exists(p)]
+        def _b64_img(path: str) -> str:
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode("ascii")
 
-    if logo_files:
-        logo_h = 100  # px fixed height
-        gap_px = 24   # fixed horizontal spacing
-        # CSS for a single-row centered flex layout with fixed gaps
-        st.markdown(
-            f"""
-            <style>
-            .logo-row {{
-                display: flex;
-                align-items: center;
-                justify-content: left;
-                gap: {gap_px}px;
-                flex-wrap: nowrap;
-                margin-bottom: 8px;
-            }}
-            .logo-row img {{
-                height: {logo_h}px;
-                object-fit: contain;
-                display: inline-block;
-            }}
-            @media (max-width: 900px) {{
-                .logo-row {{ flex-wrap: wrap; gap: 16px; }}
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+        logos = [
+            "figures/riwwer-logo.png",
+            "figures/bht-logo.png",
+            "figures/calgolab-logo.png",
+            "figures/okeanos-logo.png",
+            "figures/ude-logo.png",
+        ]
+        logo_files = [p for p in logos if os.path.exists(p)]
 
-        # Build the row of images
-        imgs_html = []
-        for path in logo_files:
-            try:
-                b64 = _b64_img(path)
-                imgs_html.append(
-                    f"<img src='data:image/png;base64,{b64}' alt='{os.path.basename(path)}' />"
-                )
-            except Exception:
-                imgs_html.append(
-                    f"<img src='{path}' alt='{os.path.basename(path)}' />"
-                )
+        if logo_files:
+            logo_h = 100  # px fixed height
+            gap_px = 24   # fixed horizontal spacing
+            # CSS for a single-row centered flex layout with fixed gaps
+            st.markdown(
+                f"""
+                <style>
+                .logo-row {{
+                    display: flex;
+                    align-items: center;
+                    justify-content: left;
+                    gap: {gap_px}px;
+                    flex-wrap: nowrap;
+                    margin-bottom: 8px;
+                }}
+                .logo-row img {{
+                    height: {logo_h}px;
+                    object-fit: contain;
+                    display: inline-block;
+                }}
+                @media (max-width: 900px) {{
+                    .logo-row {{ flex-wrap: wrap; gap: 16px; }}
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
 
-        st.markdown("<div class='logo-row'>" + "".join(imgs_html) + "</div>", unsafe_allow_html=True)
-except Exception:
-    pass
+            # Build the row of images
+            imgs_html = []
+            for path in logo_files:
+                try:
+                    b64 = _b64_img(path)
+                    imgs_html.append(
+                        f"<img src='data:image/png;base64,{b64}' alt='{os.path.basename(path)}' />"
+                    )
+                except Exception:
+                    imgs_html.append(
+                        f"<img src='{path}' alt='{os.path.basename(path)}' />"
+                    )
 
-# Short intro text (full-width, styled for readability)
-# Pick text color depending on Streamlit theme (white on dark theme)
-# Theme-aware styling
-try:
-    current_theme = st.context.theme.type
-except Exception:
-    current_theme = 'light'
-is_dark = (current_theme == 'dark')
-_intro_text_color = "#ffffff" if is_dark else "#111111"
-st.markdown(
-    f"""
-    <div style="width:100%; box-sizing:border-box; padding:0 16px; font-size:19px; line-height:1.45; color:{_intro_text_color};">
-    <strong>Welcome to the RIWWER ML Demo!</strong> This application showcases the machine learning (ML) models for Urban Wastewater Management
-    developed by the Berliner Hochschule für Technik, Okeanos and the University of Duisburg-Essen. 
-    The models are applied to historical data from the combined sewer system of Vierlinden in Duisburg (<em>Wirtschaftsbetriebe Duisburg</em>).
-    We demonstrate the performance of ML models to forecast filling levels and estimate the risk of Combined Sewer Overflows in the year 2023.
-    The models were trained with data from the years of 2021 and 2022. For further information consult our GitHub repository: <a href="https://github.com/calgo-lab/resilient-timeseries-evaluation">resilient-timeseries-evaluation</a><br/>
-    <br/>
-    Start by navigating through time using the buttons and sliders in the <strong>Time Navigation Control</strong>. Alternatively you can also search for specific rain events using the <em>"Select rainfall"</em> slider.<br/>
-    <br/>
-    The project was funded by the Federal Ministry of Economic Affairs and Climate Action of Germany for the RIWWER project (01MD22007H, 01MD22007C).<br/>
-    <em>RIWWER: Reduction of the Impact of untreated WasteWater on the Environment in case of torrential Rain</em>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+            st.markdown("<div class='logo-row'>" + "".join(imgs_html) + "</div>", unsafe_allow_html=True)
+    except Exception:
+        pass
 
-# Styles for bordered panels with a blue title bar
-st.markdown(
-    """
-    <style>
-    .panel-header {
-        background: #c2cbfc;
-        border-left: 4px solid #1f6feb;
-        color: #0b63ce;
-        padding: 0.4rem 0.75rem;
-        font-weight: 600;
-        border-radius: 4px;
-        margin-bottom: 0.5rem;
-        font-size: 1.2rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+    # Short intro text (full-width, styled for readability)
+    # Pick text color depending on Streamlit theme (white on dark theme)
+    # Theme-aware styling
+    try:
+        current_theme = st.context.theme.type
+    except Exception:
+        current_theme = 'light'
+    is_dark = (current_theme == 'dark')
+    _intro_text_color = "#ffffff" if is_dark else "#111111"
+    st.markdown(
+        f"""
+        <div style="width:100%; box-sizing:border-box; padding:0 16px; font-size:19px; line-height:1.45; color:{_intro_text_color};">
+        <strong>Welcome to the RIWWER ML Demo!</strong> This application showcases the machine learning (ML) models for Urban Wastewater Management
+        developed by the Berliner Hochschule für Technik, Okeanos and the University of Duisburg-Essen. 
+        The models are applied to historical data from the combined sewer system of Vierlinden in Duisburg (<em>Wirtschaftsbetriebe Duisburg</em>).
+        We demonstrate the performance of ML models to forecast filling levels and estimate the risk of Combined Sewer Overflows in the year 2023.
+        The models were trained with data from the years of 2021 and 2022. For further information consult our GitHub repository: <a href="https://github.com/calgo-lab/resilient-timeseries-evaluation">resilient-timeseries-evaluation</a><br/>
+        <br/>
+        Start by navigating through time using the buttons and sliders in the <strong>Time Navigation Control</strong>. Alternatively you can also search for specific rain events using the <em>"Select rainfall"</em> slider.<br/>
+        <br/>
+        The project was funded by the Federal Ministry of Economic Affairs and Climate Action of Germany for the RIWWER project (01MD22007H, 01MD22007C).<br/>
+        <em>RIWWER: Reduction of the Impact of untreated WasteWater on the Environment in case of torrential Rain</em>
+        <br/><br/>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Styles for bordered panels with a blue title bar
+    st.markdown(
+        """
+        <style>
+        .panel-header {
+            background: #c2cbfc;
+            border-left: 4px solid #1f6feb;
+            color: #0b63ce;
+            padding: 0.4rem 0.75rem;
+            font-weight: 600;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Demo video & citation rendered in the static header to avoid being re-created by fragments
+    try:
+        video_url = "https://cloud.bht-berlin.de/public.php/dav/files/b9xt4T3SdiLBiFZ"
+        # Put Demo Video and Cite Us side-by-side in columns (4:2)
+        cols = st.columns([5, 4], gap="small")
+        # Left: embedded video
+        with cols[0]:
+            with st.container(border=True):
+                st.markdown("<div class='panel-header'>🎬 Demo Video</div>", unsafe_allow_html=True)
+                try:
+                    html5_video = (
+                        f'<div style="display:flex;justify-content:center;">'
+                        f'<div style="width:min(100%, 75rem);">'
+                        f'<video controls preload="metadata" style="display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:8px;" src="{video_url}">'
+                        f'Your browser does not support the video tag.'
+                        f'</video>'
+                        f'</div>'
+                        f'</div>'
+                    )
+                    st.markdown(html5_video, unsafe_allow_html=True)
+                except Exception:
+                    st.markdown(
+                        f"<div style='text-align:center; padding:12px 8px;'><a href='{video_url}' target='_blank' style='display:inline-block; padding:10px 18px; background:#1f6feb; color:#fff; border-radius:6px; text-decoration:none; font-weight:600;'>▶️ Open Video</a></div>",
+                        unsafe_allow_html=True,
+                    )
+        # Right: citation and links with matching font size to intro
+        with cols[1]:
+            with st.container(border=True):
+                st.markdown("<div class='panel-header'>📚 Learn More & Cite Us</div>", unsafe_allow_html=True)
+                pub_html = f"<div style='font-size:19px; line-height:1.45; color:{_intro_text_color};'>\n<strong>Publication:</strong><br/>\n\"A Resilient Solution for Sewer Overflow Monitoring across Cloud and Edge\"\n</div>"
+                st.markdown(pub_html, unsafe_allow_html=True)
+
+                citation_text = '''@article{singh2026resilientsolutionseweroverflow,
+    title={A Resilient Solution for Sewer Overflow Monitoring across Cloud and Edge}, 
+    author={Vipin Singh and Tianheng Ling and Peter Ghaly and Felix Grimmeisen and Gregor Schiele and Felix Biessmann},
+    year={2026},
+    eprint={2605.10592},
+    archivePrefix={arXiv},
+    primaryClass={cs.AI},
+    url={https://arxiv.org/abs/2605.10592}, 
+}'''
+
+                st.markdown(f"<div style='font-size:19px; line-height:1.45; color:{_intro_text_color};'><strong>BibTeX Citation:</strong></div>", unsafe_allow_html=True)            
+                st.code(citation_text, language="bibtex")
+                st.markdown(f"<div style='font-size:19px; line-height:1.45; color:{_intro_text_color};'><strong>Paper URL (arXiv):</strong></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:19px; line-height:1.45;'><a href='https://arxiv.org/abs/2605.10592' target='_blank'>https://arxiv.org/abs/2605.10592</a></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:19px; line-height:1.45; color:{_intro_text_color};'>accepted at 35th International Joint Conference on Artificial Intelligence 2026 (IJCAI-ECAI 2026), Demonstrations Track.</div>", unsafe_allow_html=True)
+    except Exception:
+        # Avoid breaking the static header if any of these elements fail
+        pass
+
+
+# =============================================================================
+# SESSION STATE INITIALIZATION
+# =============================================================================
+
+def init_session_state():
+    """Initialize all session state variables for time navigation."""
+    
+    # Core time navigation state
+    if "current_idx" not in st.session_state:
+        st.session_state.current_idx = 0
+    
+    if "is_playing" not in st.session_state:
+        st.session_state.is_playing = False
+        
+    if "current_update_time_interval" not in st.session_state:
+        st.session_state.current_update_time_interval = None
+    
+    # Note: speed_multiplier is NOT initialized here - let the selectbox widget handle it
+    # Using .get() with default in dynamic_content_fragment instead
+    
+    # Timing accumulators for smooth playback
+    if "last_update_time" not in st.session_state:
+        st.session_state.last_update_time = time.time()
+    
+    if "accumulated_time" not in st.session_state:
+        st.session_state.accumulated_time = 0.0
+    
+    # Skip auto-advance flag (prevents double-step on play)
+    if "skip_autoadvance" not in st.session_state:
+        st.session_state.skip_autoadvance = False
+    
+    # Rainfall slider versioning and suppression
+    if "rain_slider_ver" not in st.session_state:
+        st.session_state.rain_slider_ver = 0
+    
+    if "rain_suppress" not in st.session_state:
+        st.session_state.rain_suppress = False
+    
+    if "rain_last_sig" not in st.session_state:
+        st.session_state.rain_last_sig = ""
+
+
+def _reset_timing_state():
+    """Reset timing accumulators used by play/auto-advance."""
+    st.session_state.last_update_time = time.time()
+    st.session_state.accumulated_time = 0.0
+    st.session_state.skip_autoadvance = True
+
+
+def _step_backward():
+    """Step one index back (bounded at 0), mirroring Back button behavior."""
+    st.session_state.current_idx = max(0, st.session_state.current_idx - 1)
+    _reset_timing_state()
+
+
+def _on_scope_change():
+    """Callback when model scope changes - sets flag to trigger rerun after event handling."""
+    st.session_state._scope_changed = True
+
 
 # Load data
 vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
@@ -210,11 +340,17 @@ def render_dashboard_config_panel():
             index=0,
             horizontal=True,
             key="model_scope_selector",
+            on_change=_on_scope_change,
             help=(
                 "Standard operation: Uses all available sensor information within the network. "
                 "Full network outage: Treats all external sensor information as inactive and use only local measurements for the forecasts."
             ),
         )
+        # Deferred rerun after scope change (avoids warning about replacing element during event handling)
+        if st.session_state.get("_scope_changed", False):
+            st.session_state._scope_changed = False
+            st.rerun(scope="app")
+        
         is_local = st.session_state.get("model_scope_selector", "Standard operation") == "Full network outage"
         is_global = not is_local
         # Local model selector (only visible in Local mode)
@@ -237,8 +373,7 @@ def render_dashboard_config_panel():
                 help="Choose which global model's predictions to visualize (12-step ahead).",
             )
 
-# Initialize components using the smooth TimeSliderLive approach
-time_slider = TimeSliderLive(vierlinden_data, session_key="pydeck_main")
+# Initialize chart components
 simulation_chart = SimulationChart(
     key="pydeck_simulation_chart",
     interactive=True
@@ -587,11 +722,11 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                     }
                 )
 
-            # This is the key - using a unique key based on iteration prevents flickering
+            # Use a stable key to avoid Streamlit recreating the element every render (reduces layout jumps)
             st.pydeck_chart(
                 deck,
                 use_container_width=True,
-                key=f"enhanced_pydeck_map_{iteration}",
+                key="enhanced_pydeck_map",
                 height=420,
             )
 
@@ -679,7 +814,7 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 current_timestamp=timestamp,
                 current_value=current_value,
                 target_column=TARGET_COLUMN,
-                iteration=iteration,
+                iteration=None,
                 show_checkbox=False,  # Disable internal checkbox to avoid conflicts
                 y_axis_bounds=y_axis_bounds,  # Fixed y-axis bounds for consistent scaling
                 height=635,
@@ -707,15 +842,347 @@ def smooth_content_renderer(idx: int, timestamp: pd.Timestamp, data_row: pd.Seri
                 future_hours=12,
                 height=260,
                 show_controls=False,
-                is_playing=st.session_state.get("pydeck_main_is_playing", False),
+                is_playing=st.session_state.get("is_playing", False),
             )
             st.markdown("</div>", unsafe_allow_html=True)
 
-# Run the smooth live dashboard using TimeSliderLive
-time_slider.run_live_dashboard(
-    content_renderer=smooth_content_renderer,
-    updates_per_second=4.0,  # Smooth update rate
-    show_controls=True,
-    max_iterations=2000,
-    left_of_nav_renderer=render_dashboard_config_panel
-)
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+# Render static header (runs once at startup)
+render_static_header()
+
+# Initialize session state
+init_session_state()
+
+# Load data
+vierlinden_data = read_data()[read_data().index >= "2023-01-01"]
+map_data = load_map_data()
+
+# Calculate average hours per step for speed calculation
+total_data_duration = (vierlinden_data.index[-1] - vierlinden_data.index[0]).total_seconds() / 3600
+avg_hours_per_step = total_data_duration / max(1, len(vierlinden_data) - 1)
+max_index = len(vierlinden_data) - 1
+
+# One-time app initialization to ensure UI starts at first time step (index 0)
+# Some fragment-based reruns can cause the slider to appear at position 2 (index 1) on first load;
+# enforce a single-run correction so users see the first timestep initially.
+if not st.session_state.get("app_init_done", False):
+    try:
+        # Force first index
+        st.session_state.current_idx = 0
+        # last_idx is 1-based slider mirror
+        st.session_state.last_idx = 1
+        # Ensure slider versions are initialized
+        st.session_state.time_slider_ver = st.session_state.get("time_slider_ver", 0)
+        st.session_state.rain_slider_ver = st.session_state.get("rain_slider_ver", 0)
+    except Exception:
+        pass
+    st.session_state.app_init_done = True
+
+# =============================================================================
+# TIME NAVIGATION FRAGMENT (runs on user interaction)
+# =============================================================================
+
+@st.fragment(run_every=st.session_state.get("current_update_time_interval", None))  # Auto-update at specified interval for progress bar
+def time_navigation_fragment():
+    """Fragment for time navigation controls - reruns on user interaction and at specified interval for progress."""
+    
+    # Workaround: after the first fragment reload, force a single "Back"-style step.
+    # This addresses an initialization race where the UI can start on step 2 (index 1).
+    if not st.session_state.get("first_step_fix_applied", False):
+        st.session_state.first_step_fix_applied = True
+        _step_backward()
+        st.session_state.last_idx = st.session_state.current_idx + 1  # slider is 1-based
+        st.session_state.time_slider_ver = st.session_state.get("time_slider_ver", 0) + 1
+        st.session_state.rain_slider_ver = st.session_state.get("rain_slider_ver", 0) + 1
+        st.session_state.rain_suppress = True
+        st.rerun(scope="app")
+        return
+    
+    left_col, right_col = st.columns([1.5, 6], gap="small")
+    
+    # Left: Configuration panel
+    with left_col:
+        render_dashboard_config_panel()
+    
+    # Right: Time navigation controls
+    with right_col:
+        with st.container(border=True):
+            st.markdown("<div class='panel-header'>⏱️ Time Navigation</div>", unsafe_allow_html=True)
+            
+            # Control buttons (matching original TimeSliderLive pattern)
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                st.write("")
+                # Disable Back button when at the beginning or playing (to prevent double-step issues)
+                back_disabled = st.session_state.is_playing or st.session_state.current_idx <= 0
+                if st.button("Back", key="nav_back", icon="⏪", use_container_width=True, disabled=back_disabled):
+                    _step_backward()
+            
+            with col2:
+                st.write("")
+                # Separate Play/Pause buttons (like original)
+                if st.session_state.is_playing:
+                    if st.button("**Pause**", key="nav_pause_btn", type="primary", icon="⏸️", use_container_width=True):
+                        st.session_state.is_playing = False
+                        st.session_state.current_update_time_interval = None
+                        st.rerun(scope="app")
+                else:
+                    if st.button("**Play**", key="nav_play_btn", type="primary", icon="▶️", use_container_width=True):
+                        st.session_state.is_playing = True
+                        st.session_state.current_update_time_interval = st.session_state.get("next_update_time_interval", 1.0)  # Restore last interval or default to 1s
+                        st.session_state.last_update_time = time.time()
+                        st.session_state.accumulated_time = 0.0
+                        st.session_state.skip_autoadvance = True
+                        st.rerun(scope="app")
+            
+            with col3:
+                st.write("")
+                # Disable Forward button when at the end or playing (to prevent double-step issues)
+                forward_disabled = st.session_state.is_playing or st.session_state.current_idx >= max_index
+                if st.button("Forward", key="nav_forward", icon="⏩", use_container_width=True, disabled=forward_disabled):
+                    # Like original _step_forward() - reset timing state
+                    new_idx = min(st.session_state.current_idx + 1, max_index)
+                    st.session_state.current_idx = new_idx
+                    st.session_state.last_update_time = time.time()
+                    st.session_state.accumulated_time = 0.0
+                    st.session_state.skip_autoadvance = True
+                    # If at end, stop playing
+                    if new_idx >= max_index:
+                        st.session_state.is_playing = False
+            
+            with col4:
+                st.write("")
+                st.write("")
+                if st.session_state.is_playing:
+                    st.write("**Status:** ▶️ Playing")
+                else:
+                    st.write("**Status:** ⏸️ Paused")
+            
+            with col5:
+                # Speed selector - use fixed default, key handles persistence
+                speed_options = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0]
+                
+                multiplier = st.selectbox(
+                    "Speed",
+                    speed_options,
+                    index=5,  # Default to 10x
+                    format_func=lambda x: f"{x}x",
+                    key="speed_multiplier",
+                )
+                
+                st.session_state.next_update_time_interval = min(MAX_UPDATE_INTERVAL, max(1 / multiplier, MIN_UPDATE_INTERVAL))  # Limit to min/max for stability
+                # Update current interval if changed while playing
+                if st.session_state.get("current_update_time_interval", None) != st.session_state.next_update_time_interval and st.session_state.is_playing:
+                    st.session_state.current_update_time_interval = st.session_state.next_update_time_interval
+                    st.rerun(scope="app")
+            
+            # Time slider (when paused) or progress bar (when playing)
+            if not st.session_state.is_playing:
+                # Columns for sliders (right) and metrics (left) - like original
+                metric_col, slider_col = st.columns([1, 10])
+                
+                # Initialize time slider version if needed
+                if "time_slider_ver" not in st.session_state:
+                    st.session_state.time_slider_ver = 0
+                
+                # Initialize last_idx for change detection (1-based for slider)
+                if "last_idx" not in st.session_state:
+                    st.session_state.last_idx = st.session_state.current_idx + 1
+                
+                with slider_col:
+                    # Use versioned key like original TimeSliderLive
+                    # 1-based for UX, internally 0-based
+                    slider_val = st.slider(
+                        "Select time step",
+                        min_value=1,
+                        max_value=max_index + 1,
+                        value=st.session_state.current_idx + 1,
+                        step=1,
+                        key=f"time_slider_{st.session_state.time_slider_ver}",
+                    )
+                
+                # Detect slider change (like original) - convert 1-based to 0-based
+                if slider_val != st.session_state.last_idx:
+                    st.session_state.current_idx = slider_val - 1
+                    st.session_state.last_idx = slider_val
+                    st.session_state.rain_slider_ver = st.session_state.rain_slider_ver + 1
+                    st.session_state.rain_suppress = True
+                    st.session_state.skip_autoadvance = True
+                    st.rerun(scope="app")
+                
+                # If current_idx changed externally (e.g., via Back/Forward or rainfall auto-jump),
+                # bump both time_slider_ver AND rain_slider_ver to force both sliders to reinitialize
+                # Detect by: slider value (1-based) doesn't match last_idx but equals current_idx + 1
+                if slider_val == st.session_state.last_idx and slider_val != st.session_state.current_idx + 1:
+                    st.session_state.time_slider_ver = st.session_state.time_slider_ver + 1
+                    st.session_state.rain_slider_ver = st.session_state.rain_slider_ver + 1
+                
+                # Progress metric in left column
+                with metric_col:
+                    progress_pct = (st.session_state.current_idx / max(1, max_index)) * 100
+                    st.metric("Progress", f"{progress_pct:.1f}%", width="stretch")
+                
+                # Rainfall slider (when paused)
+                rain_series = pd.to_numeric(vierlinden_data[RAINFALL_COLUMN], errors="coerce") if RAINFALL_COLUMN in vierlinden_data.columns else None
+                if rain_series is not None and not rain_series.dropna().empty:
+                    rmin = float(rain_series.min(skipna=True))
+                    rmax = float(rain_series.max(skipna=True))
+                    current_rain = rain_series.iloc[st.session_state.current_idx]
+                    default_r = float(current_rain) if pd.notna(current_rain) else float(max(rmin, 0.0))
+                    
+                    rain_metric_col, rain_slider_col, rain_tol_col = st.columns([1, 9, 1])
+                    
+                    with rain_slider_col:
+                        rain_sel = st.slider(
+                            "Select rainfall",
+                            min_value=rmin,
+                            max_value=rmax,
+                            value=min(max(default_r, rmin), rmax),
+                            step=max((rmax - rmin) / 100.0, 0.001),
+                            key=f"rain_slider_{st.session_state.rain_slider_ver}",
+                        )
+                    
+                    with rain_tol_col:
+                        tol = st.number_input(
+                            "Tolerance (±)",
+                            min_value=0.0,
+                            value=0.1,
+                            step=0.05,
+                            key="rain_tolerance",
+                        )
+                    
+                    # Rainfall metric in left column
+                    with rain_metric_col:
+                        st.metric("Rainfall (mm)", f"{rain_sel:.2f}", width="content")
+                    
+                    # Auto-jump logic
+                    anchor_sig = f"{rain_sel:.6f}|{tol:.6f}|{st.session_state.current_idx}"
+                    
+                    if st.session_state.rain_suppress:
+                        st.session_state.rain_suppress = False
+                        st.session_state.rain_last_sig = anchor_sig
+                    elif st.session_state.rain_last_sig != anchor_sig:
+                        found_idx = None
+                        for pos in range(st.session_state.current_idx + 1, len(vierlinden_data)):
+                            v = rain_series.iloc[pos]
+                            if pd.notna(v) and abs(float(v) - float(rain_sel)) <= float(tol):
+                                found_idx = pos
+                                break
+                        
+                        wrapped = False
+                        if found_idx is None:
+                            for pos in range(0, st.session_state.current_idx + 1):
+                                v = rain_series.iloc[pos]
+                                if pd.notna(v) and abs(float(v) - float(rain_sel)) <= float(tol):
+                                    found_idx = pos
+                                    wrapped = True
+                                    break
+                        
+                        if found_idx is not None:
+                            st.session_state.current_idx = found_idx
+                            st.session_state.rain_slider_ver = st.session_state.rain_slider_ver + 1
+                            st.session_state.time_slider_ver = st.session_state.time_slider_ver + 1  # Also bump time slider
+                            st.session_state.rain_suppress = True
+                            st.session_state.rain_last_sig = anchor_sig
+                            st.rerun(scope="fragment")  # Trigger re-render to jump to new location
+                            if wrapped:
+                                st.warning("Wrapped to start of dataset.")
+                        else:
+                            st.warning("No matching rainfall found. Increase tolerance.")
+                        
+                        st.session_state.rain_last_sig = anchor_sig
+            else:
+                # Progress bar when playing (inside time nav container, updates with fragment at 2Hz)
+                prog_col1, prog_col2 = st.columns([1, 10])
+                with prog_col1:
+                    progress_pct = (st.session_state.current_idx / max(1, max_index)) * 100
+                    st.metric("Progress", f"{progress_pct:.1f}%")
+                with prog_col2:
+                    st.write("")
+                    st.write("")
+                    st.progress(st.session_state.current_idx / max(1, max_index))
+            
+    # Render content when paused (inside fragment so it updates on slider change)
+    if not st.session_state.is_playing:
+        idx = st.session_state.current_idx
+        timestamp = vierlinden_data.index[idx]
+        data_row = vierlinden_data.iloc[idx]
+        smooth_content_renderer(idx, timestamp, data_row, idx)
+
+
+# =============================================================================
+# DYNAMIC CONTENT FRAGMENT (auto-updates via run_every)
+# =============================================================================
+
+@st.fragment(run_every=st.session_state.get("current_update_time_interval", None))  # Auto-update at specified interval
+def dynamic_content_fragment():
+    """Fragment for dynamic content - auto-updates every UPDATE_TIME_INTERVAL seconds when playing."""
+    
+    # Auto-advance when playing
+    if st.session_state.is_playing:
+        if st.session_state.skip_autoadvance:
+            st.session_state.skip_autoadvance = False
+        else:
+            # Time-based speed calculation
+            current_time = time.time()
+            elapsed_real_time = current_time - st.session_state.last_update_time
+            st.session_state.last_update_time = current_time
+            
+            # Get speed (hours per second) - use .get() with default since not pre-initialized
+            hours_per_second = st.session_state.get("speed_multiplier", 10.0)
+            
+            # Calculate how much data time should have passed
+            data_hours_elapsed = elapsed_real_time * hours_per_second
+            
+            # Accumulate fractional time
+            accumulated = st.session_state.accumulated_time + data_hours_elapsed
+            st.session_state.accumulated_time = accumulated
+            
+            # Convert accumulated time to steps (allow fractional accumulation)
+            steps_to_advance = int(accumulated / avg_hours_per_step)
+            
+            # Keep remainder for next iteration
+            if steps_to_advance > 0:
+                remainder = accumulated - (steps_to_advance * avg_hours_per_step)
+                st.session_state.accumulated_time = remainder
+                
+                # Advance the index
+                new_idx = st.session_state.current_idx + steps_to_advance
+                if new_idx >= max_index:
+                    st.session_state.current_idx = 0
+                    st.session_state.last_update_time = time.time()
+                    st.session_state.accumulated_time = 0.0
+                    st.toast("Reached end of data. Looping back to the beginning!", icon="🔄")
+                else:
+                    st.session_state.current_idx = new_idx
+        
+        # Render content when playing (inside fragment so it updates at 2Hz)
+        idx = st.session_state.current_idx
+        timestamp = vierlinden_data.index[idx]
+        data_row = vierlinden_data.iloc[idx]
+        smooth_content_renderer(idx, timestamp, data_row, idx)
+    # When paused: content is rendered in time_navigation_fragment
+
+
+# =============================================================================
+# RUN FRAGMENTS (controls + content rendering)
+# =============================================================================
+
+# Run time navigation fragment (handles user input + renders content when paused)
+time_navigation_fragment()
+
+# When playing, content is rendered by dynamic_content_fragment
+# When paused, content is rendered inside time_navigation_fragment
+
+# Run dynamic content fragment only when playing (auto-updates at 2Hz)
+if st.session_state.is_playing:
+    dynamic_content_fragment()
+
+st.markdown("Thank you for trying this demo! For more information, questions, or suggestions, contact us at: Vipin.Singh@bht-berlin.de<br> Learn more about our research at: https://calgo-lab.de", unsafe_allow_html=True)
+# Spacer preserved for page length
+st.markdown("<div style='height:600px;'></div>", unsafe_allow_html=True)

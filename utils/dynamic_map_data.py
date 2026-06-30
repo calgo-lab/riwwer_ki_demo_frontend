@@ -1,18 +1,15 @@
 import pandas as pd
 import streamlit as st
-from utils.config import COORDINATES_DICT, SENSOR_GROUPS, DATA_PATH, CACHE_TIME
+from utils.config import COORDINATES_DICT, SENSOR_GROUPS, DATA_PATH, CACHE_TIME, read_data
 
 
 @st.cache_data(ttl=CACHE_TIME)
 def load_map_data():
-    data = pd.read_csv(
-        DATA_PATH,
-        parse_dates=[0],
-        index_col=0,
-    )
-    data.index.name = "Datetime"
-    data.reset_index(inplace=True) # Is this needed?
-    
+    """Load map data - reuses cached read_data() to avoid duplicate loading."""
+    # Use the cached read_data() instead of loading the CSV again
+    data = read_data()
+    # Reset index for compatibility with existing code
+    data = data.reset_index()
     return data
 
 
